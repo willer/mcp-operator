@@ -1,0 +1,6 @@
+include README.md
+include requirements.txt
+include uvx-mcp.json
+include manifest.json
+include mcp.py
+recursive-include src *

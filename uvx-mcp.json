@@ -9,7 +9,7 @@
   },
   "spec": {
     "server": {
-      "command": ["python", "mcp.py"],
+      "command": "python -m mcp",
       "port": 9978,
       "environment": {
         "OPENAI_API_KEY": "${OPENAI_API_KEY}",
