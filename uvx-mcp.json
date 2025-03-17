@@ -10,10 +10,10 @@
   "spec": {
     "server": {
       "command": "./mcp-operator",
-      "port": 9978,
+      "transport": "stdio",
       "environment": {
         "OPENAI_API_KEY": "${OPENAI_API_KEY}",
-        "BROWSER_OPERATOR_PORT": "9978"
+        "MCP_TRANSPORT": "stdio"
       }
     },
     "tools": [

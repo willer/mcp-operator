@@ -70,14 +70,14 @@ def main():
     # Ensure we have all required dependencies
     ensure_dependencies()
     
-    # Import the FastMCP server module (after ensuring dependencies)
+    # Import the hybrid server module (after ensuring dependencies)
     try:
         # Add the current directory to path to ensure imports work
         sys.path.insert(0, str(Path(__file__).parent))
         
-        from src.fastmcp_server import main as run_fastmcp_server
-        logger.info("Dependencies installed successfully, starting FastMCP server")
-        run_fastmcp_server()
+        from src.hybrid_server import main as run_hybrid_server
+        logger.info("Dependencies installed successfully, starting hybrid server")
+        run_hybrid_server()
     except ImportError as e:
         logger.error(f"Failed to import server module: {str(e)}")
         logger.error(f"Current working directory: {os.getcwd()}")
