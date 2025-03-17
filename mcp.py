@@ -4,6 +4,7 @@ import os
 import sys
 import logging
 import subprocess
+import asyncio
 from pathlib import Path
 import importlib.util
 
@@ -75,9 +76,9 @@ def main():
         # Add the current directory to path to ensure imports work
         sys.path.insert(0, str(Path(__file__).parent))
         
-        from src.fastmcp_server import main as run_fastmcp_server
-        logger.info("Dependencies installed successfully, starting FastMCP server")
-        run_fastmcp_server()
+        from src.basic_stdio_server import main as run_basic_stdio_server
+        logger.info("Dependencies installed successfully, starting basic stdio server")
+        asyncio.run(run_basic_stdio_server())
     except ImportError as e:
         logger.error(f"Failed to import server module: {str(e)}")
         logger.error(f"Current working directory: {os.getcwd()}")
