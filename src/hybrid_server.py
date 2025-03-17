@@ -263,29 +263,41 @@ async def stdio_server():
             
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON: {e}")
-            error_response = {
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {
-                    "code": -32700,
-                    "message": "Parse error"
+            try:
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": -32700,
+                        "message": "Parse error"
+                    }
                 }
-            }
-            writer.write((json.dumps(error_response) + "\n").encode())
-            await writer.drain()
+                logger.info(f"Sending error response: {error_response}")
+                writer.write((json.dumps(error_response) + "\n").encode())
+                await writer.drain()
+            except Exception as write_error:
+                logger.error(f"Error sending response: {write_error}", exc_info=True)
+            
+        except asyncio.CancelledError:
+            logger.info("Server operation cancelled")
+            break
             
         except Exception as e:
             logger.error(f"Unexpected error: {e}", exc_info=True)
-            error_response = {
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {
-                    "code": -32000,
-                    "message": f"Internal error: {str(e)}"
+            try:
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": -32000,
+                        "message": f"Internal error: {str(e)}"
+                    }
                 }
-            }
-            writer.write((json.dumps(error_response) + "\n").encode())
-            await writer.drain()
+                logger.info(f"Sending error response: {error_response}")
+                writer.write((json.dumps(error_response) + "\n").encode())
+                await writer.drain()
+            except Exception as write_error:
+                logger.error(f"Error sending response: {write_error}", exc_info=True)
 
 def run_http_server():
     """Run a FastAPI server for HTTP communication."""
