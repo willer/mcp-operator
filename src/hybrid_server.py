@@ -42,37 +42,42 @@ async def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "name": "browser-operator",
-                    "version": "0.1.0",
-                    "schema": {
-                        "browser_operator": {
-                            "description": "Operates a browser to navigate websites, click elements, and fill forms.",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "browser_id": {
-                                        "type": "string",
-                                        "description": "Optional browser instance ID to use an existing browser. If not provided, a new browser will be created."
+                    "protocolVersion": "2024-03-01",
+                    "serverInfo": {
+                        "name": "browser-operator",
+                        "version": "0.1.0"
+                    },
+                    "capabilities": {
+                        "tools": {
+                            "browser_operator": {
+                                "description": "Operates a browser to navigate websites, click elements, and fill forms.",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                        "browser_id": {
+                                            "type": "string",
+                                            "description": "Optional browser instance ID to use an existing browser. If not provided, a new browser will be created."
+                                        },
+                                        "instruction": {
+                                            "type": "string",
+                                            "description": "The instruction to perform in the browser, such as 'navigate to google.com', 'click the search button', etc."
+                                        }
                                     },
-                                    "instruction": {
-                                        "type": "string",
-                                        "description": "The instruction to perform in the browser, such as 'navigate to google.com', 'click the search button', etc."
-                                    }
-                                },
-                                "required": ["instruction"]
-                            }
-                        },
-                        "browser_reset": {
-                            "description": "Reset (close) a browser instance.",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "browser_id": {
-                                        "type": "string",
-                                        "description": "The browser instance ID to reset."
-                                    }
-                                },
-                                "required": ["browser_id"]
+                                    "required": ["instruction"]
+                                }
+                            },
+                            "browser_reset": {
+                                "description": "Reset (close) a browser instance.",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                        "browser_id": {
+                                            "type": "string",
+                                            "description": "The browser instance ID to reset."
+                                        }
+                                    },
+                                    "required": ["browser_id"]
+                                }
                             }
                         }
                     }
