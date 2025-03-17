@@ -42,47 +42,70 @@ async def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "protocolVersion": "2024-03-01",
+                    "protocolVersion": "2024-11-05",
                     "serverInfo": {
                         "name": "browser-operator",
                         "version": "0.1.0"
                     },
                     "capabilities": {
+                        "logging": {},
+                        "prompts": {
+                            "listChanged": true
+                        },
+                        "resources": {
+                            "subscribe": true,
+                            "listChanged": true
+                        },
                         "tools": {
-                            "browser_operator": {
-                                "description": "Operates a browser to navigate websites, click elements, and fill forms.",
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": {
-                                        "browser_id": {
-                                            "type": "string",
-                                            "description": "Optional browser instance ID to use an existing browser. If not provided, a new browser will be created."
-                                        },
-                                        "instruction": {
-                                            "type": "string",
-                                            "description": "The instruction to perform in the browser, such as 'navigate to google.com', 'click the search button', etc."
-                                        }
-                                    },
-                                    "required": ["instruction"]
-                                }
-                            },
-                            "browser_reset": {
-                                "description": "Reset (close) a browser instance.",
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": {
-                                        "browser_id": {
-                                            "type": "string",
-                                            "description": "The browser instance ID to reset."
-                                        }
-                                    },
-                                    "required": ["browser_id"]
-                                }
-                            }
+                            "listChanged": true
                         }
                     }
                 }
             }
+        # Handle tools.list method
+        elif method == "tools.list":
+            # Return the list of available tools
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "tools": [
+                        {
+                            "name": "browser_operator",
+                            "description": "Operates a browser to navigate websites, click elements, and fill forms.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "browser_id": {
+                                        "type": "string",
+                                        "description": "Optional browser instance ID to use an existing browser. If not provided, a new browser will be created."
+                                    },
+                                    "instruction": {
+                                        "type": "string", 
+                                        "description": "The instruction to perform in the browser, such as 'navigate to google.com', 'click the search button', etc."
+                                    }
+                                },
+                                "required": ["instruction"]
+                            }
+                        },
+                        {
+                            "name": "browser_reset",
+                            "description": "Reset (close) a browser instance.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "browser_id": {
+                                        "type": "string",
+                                        "description": "The browser instance ID to reset."
+                                    }
+                                },
+                                "required": ["browser_id"]
+                            }
+                        }
+                    ]
+                }
+            }
+                
         # MCP shutdown method
         elif method == "shutdown":
             # Close all browser instances
