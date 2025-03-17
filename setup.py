@@ -16,6 +16,7 @@ setup(
         "pydantic>=1.10.7"
     ],
     python_requires=">=3.8",
+    py_modules=["mcp"],
     entry_points={
         "console_scripts": [
             "mcp-operator=mcp:main",
