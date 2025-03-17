@@ -11,7 +11,12 @@ from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from browser_operator import BrowserOperator, BrowserInstance
+try:
+    # First try importing from src (local development)
+    from src.browser_operator import BrowserOperator, BrowserInstance
+except ImportError:
+    # Then try importing from the top level (installed package)
+    from browser_operator import BrowserOperator, BrowserInstance
 
 app = FastAPI()
 browser_operators: Dict[str, BrowserOperator] = {}

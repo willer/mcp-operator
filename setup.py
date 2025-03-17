@@ -6,7 +6,7 @@ setup(
     version="0.1.0",
     description="Browser Operator MCP using Playwright for Claude",
     author="Claude",
-    packages=find_packages(),
+    packages=["src"],
     include_package_data=True,
     install_requires=[
         "fastapi>=0.95.0",
@@ -16,7 +16,7 @@ setup(
         "pydantic>=1.10.7"
     ],
     python_requires=">=3.8",
-    py_modules=["mcp"],
+    py_modules=["mcp", "browser_operator", "main"],
     entry_points={
         "console_scripts": [
             "mcp-operator=mcp:main",
