@@ -87,19 +87,65 @@ async def handle_request(request):
     logger.info(f"Processing method: {method} with params: {params}")
     
     if method == "initialize":
-        # Simple initialization response without version
+        # Initialization response with all required fields
         return {
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "name": "browser-operator",
-                "version": "0.1.0",
-                "capabilities": {}
+                "protocolVersion": "2023-07-01",
+                "serverInfo": {
+                    "name": "browser-operator",
+                    "version": "0.1.0"
+                },
+                "capabilities": {
+                    "tools": {
+                        "listChanged": True
+                    }
+                }
             }
         }
         
+    elif method == "tools.register":
+        # Return tools in the format Claude expects for registration
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "mcp__browser-operator__browser_operator": {
+                    "description": "Operates a browser to navigate websites, click elements, and fill forms.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "browser_id": {
+                                "type": "string",
+                                "description": "Optional browser ID to use an existing browser"
+                            },
+                            "instruction": {
+                                "type": "string",
+                                "description": "The instruction to perform in the browser"
+                            }
+                        },
+                        "required": ["instruction"]
+                    }
+                },
+                "mcp__browser-operator__browser_reset": {
+                    "description": "Reset a browser instance",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "browser_id": {
+                                "type": "string",
+                                "description": "The browser ID to reset"
+                            }
+                        },
+                        "required": ["browser_id"]
+                    }
+                }
+            }
+        }
+    
     elif method == "tools.list":
-        # Return available tools
+        # Return available tools (list format for standard MCP clients)
         return {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -139,7 +185,7 @@ async def handle_request(request):
             ]
         }
         
-    elif method == "browser_operator":
+    elif method == "browser_operator" or method == "mcp__browser-operator__browser_operator":
         # Get parameters
         browser_id = params.get("browser_id")
         instruction = params.get("instruction")
@@ -176,7 +222,7 @@ async def handle_request(request):
             }
         }
         
-    elif method == "browser_reset":
+    elif method == "browser_reset" or method == "mcp__browser-operator__browser_reset":
         # Get parameters
         browser_id = params.get("browser_id")
         
