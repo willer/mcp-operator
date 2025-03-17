@@ -36,7 +36,65 @@ async def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"Received request {req_id}: {method} with params {params}")
     
     try:
-        if method == "browser_operator":
+        # MCP initialization method
+        if method == "initialize":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "name": "browser-operator",
+                    "version": "0.1.0",
+                    "schema": {
+                        "browser_operator": {
+                            "description": "Operates a browser to navigate websites, click elements, and fill forms.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "browser_id": {
+                                        "type": "string",
+                                        "description": "Optional browser instance ID to use an existing browser. If not provided, a new browser will be created."
+                                    },
+                                    "instruction": {
+                                        "type": "string",
+                                        "description": "The instruction to perform in the browser, such as 'navigate to google.com', 'click the search button', etc."
+                                    }
+                                },
+                                "required": ["instruction"]
+                            }
+                        },
+                        "browser_reset": {
+                            "description": "Reset (close) a browser instance.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "browser_id": {
+                                        "type": "string",
+                                        "description": "The browser instance ID to reset."
+                                    }
+                                },
+                                "required": ["browser_id"]
+                            }
+                        }
+                    }
+                }
+            }
+        # MCP shutdown method
+        elif method == "shutdown":
+            # Close all browser instances
+            for operator in list(browser_operators.values()):
+                try:
+                    await operator.close()
+                except Exception as e:
+                    logger.error(f"Error closing browser: {e}")
+            browser_operators.clear()
+            
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"status": "ok"}
+            }
+        # Tool methods
+        elif method == "browser_operator":
             return await handle_browser_operator(req_id, params)
         elif method == "browser_reset":
             return await handle_browser_reset(req_id, params)
