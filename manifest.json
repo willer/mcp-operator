@@ -1,0 +1,13 @@
+{
+  "name": "browser-operator",
+  "version": "0.1.0",
+  "type": "mcp",
+  "description": "Browser Operator MCP using Playwright for Claude",
+  "entry": "uvx-mcp.json",
+  "author": "Claude",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/username/operator-mcp"
+  }
+}
