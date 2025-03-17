@@ -76,7 +76,7 @@ async def process_request(request):
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "protocolVersion": "2023-07-01",
+                    "protocolVersion": "2024-11-05",
                     "capabilities": {
                         "logging": {},
                         "prompts": {
