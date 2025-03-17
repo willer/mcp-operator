@@ -236,19 +236,30 @@ async def stdio_server():
     )
     writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, asyncio.get_event_loop())
     
+    logger.info("Stdio server setup complete, waiting for input")
+    
     # Process JSON-RPC requests over stdin/stdout
     while True:
         try:
+            logger.info("Waiting for input...")
             line = await reader.readline()
             if not line:
+                logger.info("End of input stream")
                 break
                 
+            logger.info(f"Received line: {line.decode('utf-8').strip()}")
             request = json.loads(line)
+            logger.info(f"Parsed request: {request}")
+            
             response = await handle_request(request)
+            logger.info(f"Sending response: {response}")
             
             # Write the response as a single line of JSON
-            writer.write((json.dumps(response) + "\n").encode())
+            response_json = json.dumps(response) + "\n"
+            logger.info(f"Encoded response: {response_json.strip()}")
+            writer.write(response_json.encode())
             await writer.drain()
+            logger.info("Response sent")
             
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON: {e}")
