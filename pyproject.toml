@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "A web browser operator MCP server project"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [ "mcp>=1.4.1",]
+dependencies = [
+    "mcp>=1.4.1",
+    "aiohttp>=3.8.4",
+    "playwright>=1.30.0",
+    "pydantic>=1.10.7",
+]
 [[project.authors]]
 name = "willer"
 email = "steve.willer@gmail.com"

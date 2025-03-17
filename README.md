@@ -1,6 +1,6 @@
 # mcp-operator MCP server
 
-A web browser operator MCP server project
+A web browser operator MCP server project that allows AI assistants to control a Chrome browser.
 
 ## Components
 
@@ -19,14 +19,43 @@ The server provides a single prompt:
 
 ### Tools
 
-The server implements one tool:
+The server implements the following tools:
+
+#### Note Management
 - add-note: Adds a new note to the server
   - Takes "name" and "content" as required string arguments
   - Updates server state and notifies clients of resource changes
 
+#### Browser Automation
+- create-browser: Creates a new browser instance
+  - Takes "browser_id" as a required string argument
+  - Returns a confirmation message and initial screenshot
+
+- navigate-browser: Navigates to a URL in the browser
+  - Takes "browser_id" and "url" as required string arguments
+  - Returns navigation result and current page screenshot
+
+- operate-browser: Operates the browser based on natural language instructions
+  - Takes "browser_id" and "instruction" as required string arguments
+  - Uses OpenAI's vision capabilities to interpret the current page and execute actions
+  - Returns execution results and updated page screenshot
+
+- close-browser: Closes a browser instance
+  - Takes "browser_id" as a required string argument
+  - Returns a confirmation message
+
 ## Configuration
 
-[TODO: Add configuration details specific to your implementation]
+To use the browser automation tools, you need to:
+
+1. Install the necessary dependencies:
+   - Python 3.11 or higher
+   - Playwright for browser automation
+   - An OpenAI API key for vision capabilities
+
+2. Set up your environment:
+   - Set the OPENAI_API_KEY environment variable with your OpenAI API key
+   - Install browser dependencies for Playwright with `playwright install chromium`
 
 ## Quickstart
 

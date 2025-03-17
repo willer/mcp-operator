@@ -1,4 +1,5 @@
 import asyncio
+import base64
 
 from mcp.server.models import InitializationOptions
 import mcp.types as types
@@ -6,8 +7,12 @@ from mcp.server import NotificationOptions, Server
 from pydantic import AnyUrl
 import mcp.server.stdio
 
+from .browser import BrowserOperator
+
 # Store notes as a simple key-value dict to demonstrate state management
 notes: dict[str, str] = {}
+# Initialize browser operator
+browser_operators: dict[str, BrowserOperator] = {}
 
 server = Server("mcp-operator")
 
@@ -111,6 +116,52 @@ async def handle_list_tools() -> list[types.Tool]:
                 },
                 "required": ["name", "content"],
             },
+        ),
+        types.Tool(
+            name="create-browser",
+            description="Create a new browser instance",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "browser_id": {"type": "string"},
+                },
+                "required": ["browser_id"],
+            },
+        ),
+        types.Tool(
+            name="navigate-browser",
+            description="Navigate to a URL in the browser",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "browser_id": {"type": "string"},
+                    "url": {"type": "string"},
+                },
+                "required": ["browser_id", "url"],
+            },
+        ),
+        types.Tool(
+            name="operate-browser",
+            description="Operate the browser based on a natural language instruction",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "browser_id": {"type": "string"},
+                    "instruction": {"type": "string"},
+                },
+                "required": ["browser_id", "instruction"],
+            },
+        ),
+        types.Tool(
+            name="close-browser",
+            description="Close a browser instance",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "browser_id": {"type": "string"},
+                },
+                "required": ["browser_id"],
+            },
         )
     ]
 
@@ -122,30 +173,135 @@ async def handle_call_tool(
     Handle tool execution requests.
     Tools can modify server state and notify clients of changes.
     """
-    if name != "add-note":
-        raise ValueError(f"Unknown tool: {name}")
-
     if not arguments:
         raise ValueError("Missing arguments")
 
-    note_name = arguments.get("name")
-    content = arguments.get("content")
+    if name == "add-note":
+        note_name = arguments.get("name")
+        content = arguments.get("content")
 
-    if not note_name or not content:
-        raise ValueError("Missing name or content")
+        if not note_name or not content:
+            raise ValueError("Missing name or content")
 
-    # Update server state
-    notes[note_name] = content
+        # Update server state
+        notes[note_name] = content
 
-    # Notify clients that resources have changed
-    await server.request_context.session.send_resource_list_changed()
+        # Notify clients that resources have changed
+        await server.request_context.session.send_resource_list_changed()
 
-    return [
-        types.TextContent(
-            type="text",
-            text=f"Added note '{note_name}' with content: {content}",
-        )
-    ]
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Added note '{note_name}' with content: {content}",
+            )
+        ]
+    
+    elif name == "create-browser":
+        browser_id = arguments.get("browser_id")
+        if not browser_id:
+            raise ValueError("Missing browser_id")
+        
+        # Create a new browser operator
+        browser_operator = BrowserOperator(browser_id)
+        await browser_operator.initialize()
+        browser_operators[browser_id] = browser_operator
+        
+        # Take initial screenshot to show
+        screenshot = await browser_operator.browser_instance.take_screenshot()
+        
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Created browser with ID: {browser_id}",
+            ),
+            types.ImageContent(
+                type="image",
+                data=f"data:image/png;base64,{screenshot}",
+            ) if screenshot else types.TextContent(
+                type="text",
+                text="Could not take initial screenshot.",
+            )
+        ]
+    
+    elif name == "navigate-browser":
+        browser_id = arguments.get("browser_id")
+        url = arguments.get("url")
+        
+        if not browser_id or not url:
+            raise ValueError("Missing browser_id or url")
+        
+        if browser_id not in browser_operators:
+            raise ValueError(f"Browser with ID {browser_id} not found")
+        
+        browser_operator = browser_operators[browser_id]
+        result = await browser_operator.browser_instance.navigate(url)
+        screenshot = await browser_operator.browser_instance.take_screenshot()
+        
+        return [
+            types.TextContent(
+                type="text",
+                text=result,
+            ),
+            types.ImageContent(
+                type="image",
+                data=f"data:image/png;base64,{screenshot}",
+            ) if screenshot else types.TextContent(
+                type="text",
+                text="Could not take screenshot after navigation.",
+            )
+        ]
+    
+    elif name == "operate-browser":
+        browser_id = arguments.get("browser_id")
+        instruction = arguments.get("instruction")
+        
+        if not browser_id or not instruction:
+            raise ValueError("Missing browser_id or instruction")
+        
+        if browser_id not in browser_operators:
+            raise ValueError(f"Browser with ID {browser_id} not found")
+        
+        browser_operator = browser_operators[browser_id]
+        result = await browser_operator.process_message(instruction)
+        
+        responses = [
+            types.TextContent(
+                type="text",
+                text=result["text"],
+            )
+        ]
+        
+        if "screenshot" in result and result["screenshot"]:
+            responses.append(
+                types.ImageContent(
+                    type="image",
+                    data=f"data:image/png;base64,{result['screenshot']}",
+                )
+            )
+        
+        return responses
+    
+    elif name == "close-browser":
+        browser_id = arguments.get("browser_id")
+        
+        if not browser_id:
+            raise ValueError("Missing browser_id")
+        
+        if browser_id not in browser_operators:
+            raise ValueError(f"Browser with ID {browser_id} not found")
+        
+        browser_operator = browser_operators.pop(browser_id)
+        await browser_operator.close()
+        
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Closed browser with ID: {browser_id}",
+            )
+        ]
+    
+    else:
+        raise ValueError(f"Unknown tool: {name}")
 
 async def main():
     # Run the server using stdin/stdout streams
