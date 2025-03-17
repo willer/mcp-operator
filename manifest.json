@@ -4,6 +4,9 @@
   "type": "mcp",
   "description": "Browser Operator MCP using Playwright for Claude",
   "entry": "uvx-mcp.json",
+  "bin": {
+    "mcp-operator": "mcp.py"
+  },
   "author": "Claude",
   "license": "MIT",
   "repository": {

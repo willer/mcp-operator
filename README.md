@@ -38,10 +38,10 @@ After installation:
 uvx run mcp-operator
 ```
 
-Or, you can run it directly from the repository URL without installing:
+Or, you can run it directly from the Git repository without installing:
 
 ```bash
-uvx run github:willer/mcp-operator
+uvx --from git+https://github.com/willer/mcp-operator mcp-operator
 ```
 
 ### Using with Claude
