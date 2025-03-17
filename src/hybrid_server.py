@@ -64,16 +64,15 @@ async def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
             }
         # Handle tools.list method
         elif method == "tools.list":
-            # Return the list of available tools
+            # Return the list of available tools in the modern MCP format
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "tools": [
-                        {
-                            "name": "browser_operator",
+                    "tools": {
+                        "browser_operator": {
                             "description": "Operates a browser to navigate websites, click elements, and fill forms.",
-                            "parameters": {
+                            "schema": {
                                 "type": "object",
                                 "properties": {
                                     "browser_id": {
@@ -88,10 +87,9 @@ async def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
                                 "required": ["instruction"]
                             }
                         },
-                        {
-                            "name": "browser_reset",
+                        "browser_reset": {
                             "description": "Reset (close) a browser instance.",
-                            "parameters": {
+                            "schema": {
                                 "type": "object",
                                 "properties": {
                                     "browser_id": {
@@ -102,7 +100,7 @@ async def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
                                 "required": ["browser_id"]
                             }
                         }
-                    ]
+                    }
                 }
             }
                 
@@ -121,7 +119,12 @@ async def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
                 "id": req_id,
                 "result": {"status": "ok"}
             }
-        # Tool methods
+        # Tool methods - note the correct MCP format uses the full method name with tool. prefix
+        elif method == "tool.browser_operator":
+            return await handle_browser_operator(req_id, params)
+        elif method == "tool.browser_reset":
+            return await handle_browser_reset(req_id, params)
+        # Backward compatibility for older clients
         elif method == "browser_operator":
             return await handle_browser_operator(req_id, params)
         elif method == "browser_reset":
