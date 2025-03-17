@@ -3,40 +3,28 @@
 import os
 import sys
 import logging
+from pathlib import Path
 
-# Setup logging
+# Setup logging to file only (keep stdout/stderr clean for stdio protocol)
+log_file = Path(__file__).parent / "mcp-operator.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()]
+    handlers=[logging.FileHandler(log_file)]
 )
 logger = logging.getLogger(__name__)
 
-# Add the parent directory to sys.path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
-
-logger.info(f"Python path: {sys.path}")
-logger.info(f"Current directory: {current_dir}")
-
 try:
+    # Add the parent directory to sys.path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, current_dir)
+    
+    logger.info(f"Starting MCP Operator with Python path: {sys.path}")
+    logger.info(f"Current directory: {current_dir}")
+    
     # Import and run the main function
     from mcp import main
-    logger.info("Successfully imported mcp module")
     main()
-except ImportError as e:
-    logger.error(f"Import error: {e}")
-    logger.error(f"Attempting fallback imports...")
-    
-    # Try alternative import paths
-    try:
-        sys.path.append(os.path.join(current_dir, "src"))
-        from mcp import main
-        logger.info("Successfully imported mcp module via fallback")
-        main()
-    except Exception as e2:
-        logger.error(f"Failed fallback import: {e2}")
-        sys.exit(1)
 except Exception as e:
-    logger.error(f"Error running main: {e}", exc_info=True)
+    logger.error(f"Error running MCP Operator: {e}", exc_info=True)
     sys.exit(1)
