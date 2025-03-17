@@ -1,9 +1,0 @@
-In this folder, I'd like an implementation of OpenAI's Operator as a Claude MCP. What it actually
-  needs to do is take a browser instance ID as a parameter (or null to make a new one), and use
-  Playwright to manage the browser instances. Then use OpenAI's computer-use-preview system to
-  operate the browser. The end result should be me being able to use Claude Code to fire up a
-  browser session at some URL and talk with it as it interacts with the browser on my behalf,
-  letting me take over now and then to log in etc.  Also, I would like to be able to run this MCP
-  via a uvx command, so it needs to be able to pull in its own dependencies in whatever say uvx
-  allows this. You can see sample code for how to implement this kind of operator at
-  ../openai-cua-sample-app , and you can see a sample MCP server at ../chatgpt-cos.

@@ -23,10 +23,8 @@ This is an implementation of OpenAI's Operator as a Claude MCP. It uses Playwrig
 You can install this MCP directly from GitHub:
 
 ```bash
-uvx add github:username/operator-mcp
+uvx add github:willer/mcp-operator
 ```
-
-Replace `username` with the actual GitHub username where the repository is hosted.
 
 The MCP will automatically install its dependencies when run via uvx.
 
@@ -43,12 +41,12 @@ uvx run browser-operator
 Or, you can run it directly from the repository URL without installing:
 
 ```bash
-uvx run github:username/operator-mcp
+uvx run github:willer/mcp-operator
 ```
 
 ### Using with Claude
 
-Once the MCP is running, you can use it with Claude Code. Here are some example prompts:
+Once the MCP is running, you can use it with MCP clients such as Claude Code and Claude Desktop. Here are some example prompts:
 
 - "Go to https://example.com and click the login button"
 - "Fill in the search box with 'Claude AI' and press Enter"
