@@ -62,46 +62,86 @@ async def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
                     }
                 }
             }
-        # Handle tools.list method
-        elif method == "tools.list":
-            # Return the list of available tools in the modern MCP format
+        # Handle the tools.register method for Claude
+        elif method == "tools.register":
+            # Return the list of available tools for registration
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "tools": {
-                        "browser_operator": {
-                            "description": "Operates a browser to navigate websites, click elements, and fill forms.",
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "browser_id": {
-                                        "type": "string",
-                                        "description": "Optional browser instance ID to use an existing browser. If not provided, a new browser will be created."
-                                    },
-                                    "instruction": {
-                                        "type": "string", 
-                                        "description": "The instruction to perform in the browser, such as 'navigate to google.com', 'click the search button', etc."
-                                    }
+                    "mcp__browser-operator__browser_operator": {
+                        "description": "Operates a browser to navigate websites, click elements, and fill forms.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "browser_id": {
+                                    "type": "string",
+                                    "description": "Optional browser instance ID to use an existing browser. If not provided, a new browser will be created."
                                 },
-                                "required": ["instruction"]
-                            }
-                        },
-                        "browser_reset": {
-                            "description": "Reset (close) a browser instance.",
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "browser_id": {
-                                        "type": "string",
-                                        "description": "The browser instance ID to reset."
-                                    }
-                                },
-                                "required": ["browser_id"]
-                            }
+                                "instruction": {
+                                    "type": "string", 
+                                    "description": "The instruction to perform in the browser, such as 'navigate to google.com', 'click the search button', etc."
+                                }
+                            },
+                            "required": ["instruction"]
+                        }
+                    },
+                    "mcp__browser-operator__browser_reset": {
+                        "description": "Reset (close) a browser instance.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "browser_id": {
+                                    "type": "string",
+                                    "description": "The browser instance ID to reset."
+                                }
+                            },
+                            "required": ["browser_id"]
                         }
                     }
                 }
+            }
+        
+        # Handle tools.list method
+        elif method == "tools.list":
+            # Return the list of available tools in the modern MCP format
+            return {
+                "jsonrpc": "2.0", 
+                "id": req_id,
+                "result": [
+                    {
+                        "name": "browser_operator",
+                        "description": "Operates a browser to navigate websites, click elements, and fill forms.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "browser_id": {
+                                    "type": "string",
+                                    "description": "Optional browser instance ID to use an existing browser. If not provided, a new browser will be created."
+                                },
+                                "instruction": {
+                                    "type": "string", 
+                                    "description": "The instruction to perform in the browser, such as 'navigate to google.com', 'click the search button', etc."
+                                }
+                            },
+                            "required": ["instruction"]
+                        }
+                    },
+                    {
+                        "name": "browser_reset",
+                        "description": "Reset (close) a browser instance.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "browser_id": {
+                                    "type": "string",
+                                    "description": "The browser instance ID to reset."
+                                }
+                            },
+                            "required": ["browser_id"]
+                        }
+                    }
+                ]
             }
                 
         # MCP shutdown method
@@ -119,6 +159,12 @@ async def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
                 "id": req_id,
                 "result": {"status": "ok"}
             }
+        # Handle Claude MCP tool calls
+        elif method == "mcp__browser-operator__browser_operator":
+            return await handle_browser_operator(req_id, params)
+        elif method == "mcp__browser-operator__browser_reset":
+            return await handle_browser_reset(req_id, params)
+        
         # Tool methods - note the correct MCP format uses the full method name with tool. prefix
         elif method == "tool.browser_operator":
             return await handle_browser_operator(req_id, params)

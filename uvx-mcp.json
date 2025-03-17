@@ -2,7 +2,7 @@
   "apiVersion": "v1",
   "kind": "MCP",
   "metadata": {
-    "name": "mcp-operator",
+    "name": "browser-operator",
     "version": "0.1.0",
     "description": "Browser Operator MCP using Playwright",
     "author": "Claude"
