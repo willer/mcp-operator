@@ -1,87 +1,111 @@
-# Browser Operator MCP
+# mcp-operator MCP server
 
-This is an implementation of OpenAI's Operator as a Claude MCP. It uses Playwright to manage browser instances and allows Claude to interact with the browser on your behalf.
+A web browser operator MCP server project
 
-## Features
+## Components
 
-- Launch and control browser instances with Playwright
-- Take screenshots of the current browser state
-- Execute browser actions like navigating, clicking, typing, and waiting
-- Persist browser sessions across multiple interactions
-- Option to take over the session manually for tasks like logging in
+### Resources
 
-## Requirements
+The server implements a simple note storage system with:
+- Custom note:// URI scheme for accessing individual notes
+- Each note resource has a name, description and text/plain mimetype
 
-- Python 3.8+
-- OpenAI API key (set as environment variable `OPENAI_API_KEY`)
-- uvx tool for running the MCP
+### Prompts
 
-## Installation
+The server provides a single prompt:
+- summarize-notes: Creates summaries of all stored notes
+  - Optional "style" argument to control detail level (brief/detailed)
+  - Generates prompt combining all current notes with style preference
 
-### Installing from GitHub
+### Tools
 
-You can install this MCP directly from GitHub:
+The server implements one tool:
+- add-note: Adds a new note to the server
+  - Takes "name" and "content" as required string arguments
+  - Updates server state and notifies clients of resource changes
 
+## Configuration
+
+[TODO: Add configuration details specific to your implementation]
+
+## Quickstart
+
+### Install
+
+#### Claude Desktop
+
+On MacOS: `~/Library/Application\ Support/Claude/claude_desktop_config.json`
+On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
+
+<details>
+  <summary>Development/Unpublished Servers Configuration</summary>
+  ```
+  "mcpServers": {
+    "mcp-operator": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/willer/GitHub/operator-mcp/mcp-operator",
+        "run",
+        "mcp-operator"
+      ]
+    }
+  }
+  ```
+</details>
+
+<details>
+  <summary>Published Servers Configuration</summary>
+  ```
+  "mcpServers": {
+    "mcp-operator": {
+      "command": "uvx",
+      "args": [
+        "mcp-operator"
+      ]
+    }
+  }
+  ```
+</details>
+
+## Development
+
+### Building and Publishing
+
+To prepare the package for distribution:
+
+1. Sync dependencies and update lockfile:
 ```bash
-uvx add github:willer/mcp-operator
+uv sync
 ```
 
-The MCP will automatically install its dependencies when run via uvx.
-
-## Usage
-
-### Starting the MCP with uvx
-
-After installation:
-
+2. Build package distributions:
 ```bash
-uvx run mcp-operator
+uv build
 ```
 
-Or, you can run it directly from the Git repository without installing:
+This will create source and wheel distributions in the `dist/` directory.
 
+3. Publish to PyPI:
 ```bash
-uvx --from git+https://github.com/willer/mcp-operator mcp-operator
+uv publish
 ```
 
-### Using with Claude
+Note: You'll need to set PyPI credentials via environment variables or command flags:
+- Token: `--token` or `UV_PUBLISH_TOKEN`
+- Or username/password: `--username`/`UV_PUBLISH_USERNAME` and `--password`/`UV_PUBLISH_PASSWORD`
 
-Once the MCP is running, you can use it with MCP clients such as Claude Code and Claude Desktop. Here are some example prompts:
+### Debugging
 
-- "Go to https://example.com and click the login button"
-- "Fill in the search box with 'Claude AI' and press Enter"
-- "Extract information from this webpage about pricing"
+Since MCP servers run over stdio, debugging can be challenging. For the best debugging
+experience, we strongly recommend using the [MCP Inspector](https://github.com/modelcontextprotocol/inspector).
 
-Claude will:
-1. Capture the current state of the web page
-2. Determine what actions to take based on your request
-3. Execute those actions in the browser
-4. Report back what it did and show the new state
 
-### Browser ID
+You can launch the MCP Inspector via [`npm`](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) with this command:
 
-The MCP generates a unique ID for each browser session. You can use this ID to continue working with the same browser instance in future interactions. The ID will be included in responses from the MCP.
+```bash
+npx @modelcontextprotocol/inspector uv --directory /Users/willer/GitHub/operator-mcp/mcp-operator run mcp-operator
+```
 
-### Manual Intervention
 
-For tasks that require manual intervention (like logging in):
-
-1. Claude will open the browser to the login page
-2. You can take over the browser manually to enter credentials
-3. Tell Claude when you're done, and it can continue automation
-
-## Security Notes
-
-- Your OpenAI API key is required for the computer vision capabilities
-- No passwords or sensitive data should be shared with Claude
-- Always manually handle login processes and sensitive data entry
-
-## Troubleshooting
-
-- If the browser doesn't launch, check that Playwright is installed correctly
-- If actions fail, try being more specific in your instructions to Claude
-- For OpenAI API errors, verify your API key is set correctly
-
-## License
-
-This project is open source and available under the MIT License.
+Upon launching, the Inspector will display a URL that you can access in your browser to begin debugging.

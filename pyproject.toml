@@ -1,0 +1,17 @@
+[project]
+name = "mcp-operator"
+version = "0.1.0"
+description = "A web browser operator MCP server project"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [ "mcp>=1.4.1",]
+[[project.authors]]
+name = "willer"
+email = "steve.willer@gmail.com"
+
+[build-system]
+requires = [ "hatchling",]
+build-backend = "hatchling.build"
+
+[project.scripts]
+mcp-operator = "mcp_operator:main"
