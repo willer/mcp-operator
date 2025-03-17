@@ -32,10 +32,10 @@ The MCP will automatically install its dependencies when run via uvx.
 
 ### Starting the MCP with uvx
 
-After installation from GitHub:
+After installation:
 
 ```bash
-uvx run browser-operator
+uvx run mcp-operator
 ```
 
 Or, you can run it directly from the repository URL without installing:
