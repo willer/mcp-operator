@@ -50,14 +50,14 @@ async def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
                     "capabilities": {
                         "logging": {},
                         "prompts": {
-                            "listChanged": true
+                            "listChanged": True
                         },
                         "resources": {
-                            "subscribe": true,
-                            "listChanged": true
+                            "subscribe": True,
+                            "listChanged": True
                         },
                         "tools": {
-                            "listChanged": true
+                            "listChanged": True
                         }
                     }
                 }
