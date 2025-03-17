@@ -4,53 +4,68 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import uuid
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 
-from fastmcp import FastMCP, Tool
-from fastmcp.models import ToolCall, ToolCallResponse
-
-from browser_operator import BrowserOperator
-
-# Configure logging
+# Configure logging - use stderr for messages and file for debugging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler("mcp-operator.log")]
+    handlers=[
+        logging.FileHandler("browser-operator.log"), 
+        logging.StreamHandler(sys.stderr)
+    ]
 )
 logger = logging.getLogger(__name__)
 
+# Try importing mcp.server.fastmcp - this matches how the reminders MCP works
+try:
+    from mcp.server.fastmcp import FastMCP
+    logger.info("Successfully imported FastMCP from mcp.server.fastmcp")
+except ImportError:
+    try:
+        from fastmcp import FastMCP
+        logger.info("Successfully imported FastMCP from fastmcp")
+    except ImportError:
+        logger.error("FastMCP not found, please install with: pip install fastmcp")
+        sys.exit(1)
+
+# Import our browser operator
+try:
+    from browser_operator import BrowserOperator
+except ImportError:
+    try:
+        from src.browser_operator import BrowserOperator
+    except ImportError:
+        logger.error("Could not import BrowserOperator")
+        sys.exit(1)
+
 # Store browser instances
-browser_operators: Dict[str, BrowserOperator] = {}
+browser_operators = {}
 
-app = FastMCP(
-    title="Browser Operator MCP",
-    description="Control browser instances using Playwright",
-)
+# Create the MCP server
+mcp = FastMCP("Browser Operator")
 
-@app.tool(
-    name="browser_operator",
-    description="Operates a browser to navigate websites, click elements, and fill forms.",
-    parameters={
-        "browser_id": {
-            "type": "string",
-            "description": "Optional browser instance ID to use an existing browser. If not provided, a new browser will be created."
-        },
-        "instruction": {
-            "type": "string",
-            "description": "The instruction to perform in the browser, such as 'navigate to google.com', 'click the search button', etc."
-        }
-    },
-    required=["instruction"]
-)
-async def browser_operator(call: ToolCall) -> ToolCallResponse:
-    """Operate a browser instance."""
-    logger.info(f"Browser operator call: {call.parameters}")
+@mcp.tool()
+def browser_operator(browser_id: Optional[str] = None, instruction: str = None) -> Dict[str, Any]:
+    """
+    Operates a browser to navigate websites, click elements, and fill forms.
     
-    params = call.parameters
-    browser_id = params.get("browser_id")
-    instruction = params.get("instruction")
+    Args:
+        browser_id: Optional browser instance ID to use an existing browser. If not provided, a new browser will be created.
+        instruction: The instruction to perform in the browser, such as 'navigate to google.com', 'click the search button', etc.
     
+    Returns:
+        A dictionary containing the browser ID and the output from the operation.
+    """
+    logger.info(f"Browser operator called with ID: {browser_id}, instruction: {instruction}")
+    
+    # This is a blocking function, we need to run the async code in a new event loop
+    return asyncio.run(_browser_operator(browser_id, instruction))
+    
+async def _browser_operator(browser_id: Optional[str], instruction: str) -> Dict[str, Any]:
+    """Async implementation of browser_operator."""
     # Get or create a browser operator
     if browser_id and browser_id in browser_operators:
         operator = browser_operators[browser_id]
@@ -64,60 +79,54 @@ async def browser_operator(call: ToolCall) -> ToolCallResponse:
     # Process the instruction
     result = await operator.process_message(instruction)
     
-    return ToolCallResponse(
-        content={
-            "browser_id": browser_id,
-            "output": result
-        }
-    )
+    return {
+        "browser_id": browser_id,
+        "output": result
+    }
 
-@app.tool(
-    name="browser_reset",
-    description="Reset (close) a browser instance.",
-    parameters={
-        "browser_id": {
-            "type": "string",
-            "description": "The browser instance ID to reset."
-        }
-    },
-    required=["browser_id"]
-)
-async def browser_reset(call: ToolCall) -> ToolCallResponse:
-    """Reset a browser instance."""
-    logger.info(f"Browser reset call: {call.parameters}")
+@mcp.tool()
+def browser_reset(browser_id: str) -> Dict[str, Any]:
+    """
+    Reset (close) a browser instance.
     
-    params = call.parameters
-    browser_id = params.get("browser_id")
+    Args:
+        browser_id: The browser instance ID to reset.
+        
+    Returns:
+        A dictionary containing the status and browser ID.
+    """
+    logger.info(f"Browser reset called with ID: {browser_id}")
     
+    # This is a blocking function, we need to run the async code in a new event loop
+    return asyncio.run(_browser_reset(browser_id))
+
+async def _browser_reset(browser_id: str) -> Dict[str, Any]:
+    """Async implementation of browser_reset."""
     if browser_id in browser_operators:
         operator = browser_operators[browser_id]
         await operator.close()
         del browser_operators[browser_id]
-        return ToolCallResponse(
-            content={
-                "status": "reset",
-                "browser_id": browser_id
-            }
-        )
+        return {
+            "status": "reset",
+            "browser_id": browser_id
+        }
     else:
-        return ToolCallResponse(
-            error=f"Browser ID not found: {browser_id}"
-        )
-
-@app.on_shutdown
-async def shutdown_event():
-    """Close all browser instances on shutdown."""
-    for operator in browser_operators.values():
-        await operator.close()
+        raise ValueError(f"Browser ID not found: {browser_id}")
 
 def main():
     """Run the FastMCP server."""
-    # Get port from environment or use default (9978)
-    port = int(os.environ.get("BROWSER_OPERATOR_PORT", "9978"))
+    # Ensure logs directory exists
+    os.makedirs('logs', exist_ok=True)
     
-    # Start the server
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    # Print a message to stderr for debugging
+    print("Starting Browser Operator MCP server", file=sys.stderr)
+    
+    try:
+        # Run the MCP server
+        mcp.run()
+    except Exception as e:
+        logger.exception(f"Server error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
