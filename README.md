@@ -37,7 +37,8 @@ The server implements the following tools:
 
 - operate-browser: Operates the browser based on natural language instructions
   - Takes "browser_id" and "instruction" as required string arguments
-  - Uses OpenAI's vision capabilities to interpret the current page and execute actions
+  - Uses OpenAI's Computer Use API to interpret and interact with the current page
+  - Supports a wide range of actions: click, type, scroll, drag, keypress, etc.
   - Returns execution results and updated page screenshot
 
 - close-browser: Closes a browser instance
@@ -51,10 +52,15 @@ To use the browser automation tools, you need to:
 1. Install the necessary dependencies:
    - Python 3.11 or higher
    - Playwright for browser automation
-   - An OpenAI API key for vision capabilities
+   - An OpenAI API key with access to the Computer Use API
 
 2. Set up your environment:
-   - Set the OPENAI_API_KEY environment variable with your OpenAI API key
+   - Create a `.env` file or set environment variables:
+     ```
+     OPENAI_API_KEY=your-api-key-here
+     # Optional: If you have an org ID
+     # OPENAI_ORG=your-org-id
+     ```
    - Install browser dependencies for Playwright with `playwright install chromium`
 
 ## Quickstart

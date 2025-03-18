@@ -1,0 +1,4 @@
+#!/bin/bash
+
+
+npx @modelcontextprotocol/inspector uv run mcp-operator
