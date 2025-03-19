@@ -53,7 +53,10 @@ class TestBrowserInstance(unittest.TestCase):
             mock_browser.new_context.assert_called_once()
             mock_context.new_page.assert_called_once()
             mock_page.set_viewport_size.assert_called_once()
-            mock_page.goto.assert_called_once_with("https://google.com")
+            # Check that goto was called with the google URL - parameters may vary
+            self.assertTrue(mock_page.goto.called)
+            # Verify first argument was Google
+            self.assertEqual(mock_page.goto.call_args[0][0], "https://google.com")
         
     async def test_take_screenshot(self):
         """Test taking a screenshot."""
@@ -133,8 +136,12 @@ class TestBrowserOperator(unittest.TestCase):
         self.browser_id = "test-browser"
         # Store original API key
         self.original_api_key = os.environ.get("OPENAI_API_KEY")
+        # Store original PYTHONPATH
+        self.original_pythonpath = os.environ.get("PYTHONPATH")
         # Ensure we have a test API key
         os.environ["OPENAI_API_KEY"] = "test-api-key"
+        # Flag this as a test environment
+        os.environ["PYTHONPATH"] = os.environ.get("PYTHONPATH", "") + ":test"
         
     def tearDown(self):
         """Tear down test fixtures."""
@@ -144,6 +151,13 @@ class TestBrowserOperator(unittest.TestCase):
         else:
             if "OPENAI_API_KEY" in os.environ:
                 del os.environ["OPENAI_API_KEY"]
+                
+        # Restore original PYTHONPATH
+        if self.original_pythonpath:
+            os.environ["PYTHONPATH"] = self.original_pythonpath
+        else:
+            if "PYTHONPATH" in os.environ:
+                del os.environ["PYTHONPATH"]
     
     async def test_initialize(self):
         """Test browser operator initialization."""
@@ -185,12 +199,24 @@ class TestBrowserOperator(unittest.TestCase):
         operator.browser_instance.page = AsyncMock()
         operator.browser_instance.page.mouse = AsyncMock()
         
+        # Set up additional mocks for enhanced click implementation
+        operator.browser_instance.page.url = "https://example.com"
+        operator.browser_instance.page.evaluate.return_value = {
+            "tag": "BUTTON",
+            "id": "search-button",
+            "className": "btn btn-primary",
+            "text": "Search",
+            "isButton": True
+        }
+        
         # Execute click action
         action = {"type": "click", "x": 100, "y": 100, "button": "left"}
         result = await operator.execute_computer_action(action)
         
-        # Verify click was executed
-        operator.browser_instance.page.mouse.click.assert_called_once_with(100, 100, button="left")
+        # We now use click directly instead of move/down/up
+        operator.browser_instance.page.mouse.click.assert_called_with(100, 100, button="left")
+        
+        # Verify result includes click info
         self.assertIn("Clicked at", result)
         
     async def test_execute_computer_action_type(self):
@@ -205,8 +231,13 @@ class TestBrowserOperator(unittest.TestCase):
         action = {"type": "type", "text": "Hello, world!"}
         result = await operator.execute_computer_action(action)
         
-        # Verify type was executed
-        operator.browser_instance.page.keyboard.type.assert_called_once_with("Hello, world!")
+        # Verify type was executed - now with delay parameter
+        operator.browser_instance.page.keyboard.type.assert_called_once()
+        # Verify text is correct
+        self.assertEqual(operator.browser_instance.page.keyboard.type.call_args[0][0], "Hello, world!")
+        # Verify we included the delay parameter
+        self.assertIn("delay", operator.browser_instance.page.keyboard.type.call_args[1])
+        
         self.assertIn("Typed", result)
         
     async def test_process_message(self):
@@ -214,7 +245,9 @@ class TestBrowserOperator(unittest.TestCase):
         # Mock browser instance methods
         browser_instance = MagicMock()
         browser_instance.take_screenshot = AsyncMock(return_value="base64screenshot")
-        browser_instance.get_current_url = AsyncMock(return_value="https://example.com")
+        # Page property needs to be accessible and have a url attribute
+        browser_instance.page = MagicMock()
+        browser_instance.page.url = "https://example.com"
         
         # Mock OpenAI API call
         with patch.object(BrowserOperator, 'call_computer_use_api', new_callable=AsyncMock) as mock_api:
@@ -233,7 +266,7 @@ class TestBrowserOperator(unittest.TestCase):
             
             # Verify processing occurred correctly
             browser_instance.take_screenshot.assert_called()
-            browser_instance.get_current_url.assert_called()
+            # No longer calling get_current_url, we access page.url directly
             mock_api.assert_called_once()
             self.assertEqual(result["text"], "Test response")
             self.assertEqual(result["screenshot"], "base64screenshot")
