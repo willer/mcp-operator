@@ -24,12 +24,24 @@ cd /Users/willer/GitHub/operator-mcp && ./run_real_multistep.sh --task=search
 
 ### 3. Environment Setup
 - Using virtual environments with venv
-- Using uv for package management
+- Using uv for package management (NOT pip)
 - Always activate the environment before development:
   ```bash
   cd /Users/willer/GitHub/operator-mcp
   source .venv/bin/activate  # Or appropriate activation command
   ```
+- Use uv for installing packages and dependency management:
+  ```bash
+  # Install a package
+  uv pip install package_name
+  
+  # Install all project dependencies
+  uv pip install -e .
+  
+  # Install dev dependencies
+  uv pip install -e ".[dev]"
+  ```
+- Never use global pip - always use uv within the activated virtual environment
 
 ### 4. Code Style Guidelines
 - Follow PEP 8 for Python code style

@@ -18,7 +18,7 @@ from mcp_operator.browser import BrowserOperator
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Run real multi-step browser tests')
 parser.add_argument('--headless', action='store_true', help='Run tests in headless mode (default: False)')
-parser.add_argument('--task', type=str, default="shopping", 
+parser.add_argument('--task', type=str, default="news", 
                     help='Task to test (shopping, search, navigation)')
 args = parser.parse_known_args()[0]
 
@@ -79,14 +79,21 @@ async def test_real_multistep_operation():
         self.browser = await self.playwright.chromium.launch(**browser_options)
         self.context = await self.browser.new_context()
         
-        # Set up event listener for URL blocking
+        # Set up minimal route handler that only blocks obviously malicious domains
         async def handle_route(route, request):
             url = request.url
-            from mcp_operator.browser import check_blocklisted_url
-            if check_blocklisted_url(url):
-                logger.warning(f"Blocking access to: {url}")
+            
+            # Very short list of obviously malicious domains to block
+            blocklisted_domains = [
+                'evil.com', 'malware.com', 'phishing.com', 'virus.com'
+            ]
+            
+            # Only block obviously malicious domains
+            if any(bad_domain in url.lower() for bad_domain in blocklisted_domains):
+                logger.warning(f"Blocking access to harmful site: {url}")
                 await route.abort()
             else:
+                # Allow all other domains by default
                 await route.continue_()
                 
         await self.context.route("**/*", handle_route)
@@ -98,34 +105,128 @@ async def test_real_multistep_operation():
         # Set default timeout for all Playwright operations
         self.page.set_default_timeout(30000)  # 30 seconds for all operations
         
-        # Always start with Google
-        logger.info("Navigating to Google as starting point")
+        # Start with an empty page - let the agent figure out navigation
+        logger.info("Starting with a blank page")
         try:
-            await self.page.goto("https://google.com", wait_until='domcontentloaded', timeout=20000)
-            
-            # Wait for network idle to ensure Google is fully loaded
-            try:
-                await self.page.wait_for_load_state('networkidle', timeout=5000)
-                logger.info("Google homepage fully loaded")
-            except:
-                logger.warning("Google homepage partially loaded (network not idle)")
-                
+            # Start with about:blank - the agent should handle the navigation based on task
+            await self.page.goto("about:blank", wait_until='domcontentloaded', timeout=10000)
+            logger.info("Blank page loaded successfully")
         except Exception as e:
-            logger.error(f"Failed to load Google: {str(e)}")
-            try:
-                # Try a simpler approach as fallback
-                await self.page.goto("about:blank")
-                logger.info("Loaded about:blank as fallback")
-            except Exception as e2:
-                logger.error(f"Failed to load fallback page: {str(e2)}")
+            logger.error(f"Failed to load blank page: {str(e)}")
+            # Nothing to fall back to if even about:blank fails
     
-    # Apply the patched initialization method
+    # Apply the patched initialization method - completely replace the original method
     operator.browser_instance.initialize = patched_init.__get__(operator.browser_instance)
     
     # Initialize browser with our patched method
     print("🔄 Initializing browser...")
-    await operator.initialize()
-    print("✅ Browser initialized")
+    
+    # Apply the patch correctly
+    try:
+        await operator.browser_instance.initialize()
+        
+        # Directly create the agent without creating an additional AsyncLocalPlaywrightComputer
+        # This prevents duplicate browser instances
+        from mcp_operator.cua.agent import Agent
+        
+        # Initialize an agent that uses the already initialized browser
+        operator.agent = Agent(
+            model="computer-use-preview",
+            computer=None,  # Will be set below
+            allowed_domains=['*']  # Allow all domains using blocklist approach
+        )
+        
+        # Import required modules for the adapter
+        import base64
+        import io
+        
+        # Create the computer directly from the browser we already have open
+        class PlaywrightAdapter:
+            """Adapter to make our Playwright browser work with the CUA Agent"""
+            environment = "browser"
+            dimensions = operator.browser_instance.dimensions
+            
+            def __init__(self, page):
+                self._page = page
+                self._browser = operator.browser_instance.browser
+                # Store reference to required modules
+                self.base64 = base64
+                self.io = io
+            
+            # Implement the async context manager protocol
+            async def __aenter__(self):
+                """Async context manager entry - just return self since browser is already initialized"""
+                return self
+                
+            async def __aexit__(self, exc_type, exc_value, traceback):
+                """Async context manager exit - nothing to do, browser is managed elsewhere"""
+                pass
+            
+            async def screenshot(self):
+                """Take screenshot of current page"""
+                png_bytes = await operator.browser_instance.page.screenshot(full_page=False)
+                return self.base64.b64encode(png_bytes).decode("utf-8")
+                
+            async def click(self, x, y, button="left"):
+                """Click at coordinates"""
+                await operator.browser_instance.page.mouse.click(x, y, button=button)
+                
+            async def type(self, text):
+                """Type text"""
+                await operator.browser_instance.page.keyboard.type(text)
+                
+            async def keypress(self, keys):
+                """Press keys"""
+                for key in keys:
+                    await operator.browser_instance.page.keyboard.press(key)
+                    
+            async def wait(self, ms=1000):
+                """Wait for specified time"""
+                await asyncio.sleep(ms / 1000)
+                
+            async def scroll(self, x, y, scroll_x, scroll_y):
+                """Scroll page"""
+                await operator.browser_instance.page.mouse.move(x, y)
+                await operator.browser_instance.page.evaluate(f"window.scrollBy({scroll_x}, {scroll_y})")
+                
+            async def move(self, x, y):
+                """Move mouse"""
+                await operator.browser_instance.page.mouse.move(x, y)
+                
+            async def drag(self, path):
+                """Drag along path"""
+                if not path:
+                    return
+                await operator.browser_instance.page.mouse.move(path[0]["x"], path[0]["y"])
+                await operator.browser_instance.page.mouse.down()
+                for point in path[1:]:
+                    await operator.browser_instance.page.mouse.move(point["x"], point["y"])
+                await operator.browser_instance.page.mouse.up()
+                
+            async def double_click(self, x, y):
+                """Double-click at coordinates"""
+                await operator.browser_instance.page.mouse.dblclick(x, y)
+                
+            async def get_current_url(self):
+                """Get current page URL"""
+                return operator.browser_instance.page.url
+                
+            async def goto(self, url):
+                """Navigate to URL"""
+                try:
+                    await operator.browser_instance.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                except Exception as e:
+                    print(f"Error navigating to {url}: {e}")
+        
+        # Create the adapter and set it on the agent
+        adapter = PlaywrightAdapter(operator.browser_instance.page)
+        operator.agent.computer = adapter
+        
+        print("✅ Browser and agent initialized correctly using direct adapter")
+    except Exception as e:
+        import traceback
+        print(f"❌ Error initializing browser: {str(e)}")
+        traceback.print_exc()
     
     try:
         # Choose the task based on command line argument
@@ -136,6 +237,8 @@ async def test_real_multistep_operation():
             instruction = "Go to google.com, search for 'Python programming tutorial', and click on one of the non-ad results."
         elif TASK_TYPE == "navigation":
             instruction = "Go to wikipedia.org, search for 'Artificial Intelligence', click on the main article, then find and click on a link to 'Machine Learning'."
+        elif TASK_TYPE == "news":
+            instruction = "Go to CNN's website, locate the top news article of the day, click on it, read it, and summarize it."
         else:
             instruction = f"Go to example.com and click on the 'More information' link. Then explore the page you land on."
         

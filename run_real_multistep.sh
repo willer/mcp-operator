@@ -15,7 +15,7 @@ echo -e "Running from: $(pwd)"
 
 # Default options
 HEADLESS=""
-TASK="shopping"
+TASK="news"
 
 # Process command line options
 while [[ $# -gt 0 ]]; do
@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo -e "${RED}Unknown option: $1${NC}"
-      echo -e "Usage: $0 [--headless] [--task=shopping|search|navigation]"
+      echo -e "Usage: $0 [--headless] [--task=news|shopping|search|navigation]"
       exit 1
       ;;
   esac
@@ -46,7 +46,7 @@ fi
 
 # Show task info
 echo -e "${BLUE}Task: ${TASK}${NC}"
-echo -e "${BLUE}Available tasks: shopping, search, navigation${NC}"
+echo -e "${BLUE}Available tasks: news, shopping, search, navigation${NC}"
 echo -e "${BLUE}Use --task=<name> to select a different task${NC}"
 
 # Determine which Python command to use
@@ -74,8 +74,18 @@ fi
 if ! $PYTHON_CMD -c "import playwright" &> /dev/null; then
     echo -e "${RED}Error: Playwright not installed.${NC}"
     echo -e "${YELLOW}Installing playwright:${NC}"
-    $PYTHON_CMD -m pip install playwright
+    $PYTHON_CMD -m uv pip install playwright
     $PYTHON_CMD -m playwright install chromium
+fi
+
+# Ensure browsers are installed
+if $PYTHON_CMD -c "import playwright" &> /dev/null; then
+    if ! $PYTHON_CMD -c "from playwright.sync_api import sync_playwright; with sync_playwright() as p: p.chromium.launch(headless=True).close()" &> /dev/null; then
+        echo -e "${YELLOW}Installing playwright browsers:${NC}"
+        $PYTHON_CMD -m playwright install chromium
+    else
+        echo -e "${GREEN}Playwright browsers are already installed${NC}"
+    fi
 fi
 
 # Check if OPENAI_API_KEY is set

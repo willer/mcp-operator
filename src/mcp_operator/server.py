@@ -37,6 +37,7 @@ for handler in logging.root.handlers[:]:
 # Create our logger that only writes to file
 logger = logging.getLogger('mcp-operator')
 
+# Import the rewired browser operator that uses the CUA implementation
 from .browser import BrowserOperator
 
 # Store notes as a simple key-value dict to demonstrate state management
@@ -532,7 +533,14 @@ async def handle_call_tool(
             try:
                 # Create a new browser operator with project-based persistence
                 browser_operator = BrowserOperator(project_name)
-                await browser_operator.initialize()
+                success = await browser_operator.initialize()
+                
+                if not success:
+                    return [{
+                        "type": "text",
+                        "text": f"Error creating browser for project: {project_name}. Check logs for details.",
+                    }]
+                
                 browser_operators[project_name] = browser_operator
                 
                 # Take initial screenshot to show
@@ -607,10 +615,17 @@ async def handle_call_tool(
             try:
                 result = await browser_operator.navigate(url)
                 
+                # Create text response with navigation results
+                response_text = result.get("text", f"Navigated to {url}")
+                
+                # Add error information if available
+                if "error" in result:
+                    response_text = f"Error navigating to {url}: {result['error']}\n{response_text}"
+                
                 response = [
                     {
                         "type": "text",
-                        "text": result["text"],
+                        "text": response_text,
                     }
                 ]
                 
@@ -680,7 +695,12 @@ async def handle_call_tool(
                 actions_executed = result.get("actions_executed", 0)
                 
                 # Create response text with action count info if needed
-                result_text = result["text"]
+                result_text = result.get("text", "Operation completed")
+                
+                # Add error information if available
+                if "error" in result:
+                    result_text = f"Error processing instruction: {result['error']}\n{result_text}"
+                
                 if actions_executed == 0:
                     # Add a note about no actions being performed
                     result_text = "⚠️ No browser actions were performed. Please try a different instruction or provide more details.\n\n" + result_text
