@@ -360,6 +360,7 @@ class BrowserOperator:
         # Initialize CUA agent if not already done
         if not self.agent:
             # Create computer instance that will communicate with our browser
+            logger.info(f"Creating computer instance with headless={self.browser_instance.headless}")
             computer = AsyncLocalPlaywrightComputer(
                 headless=self.browser_instance.headless,
                 width=self.browser_instance.dimensions[0],
@@ -369,7 +370,7 @@ class BrowserOperator:
             
             # Create the agent
             self.agent = Agent(
-                model="gpt-4o",  # Use the latest model
+                model="computer-use-preview",  # Use the specialized computer use model
                 computer=computer,
                 allowed_domains=self.allow_domains
             )

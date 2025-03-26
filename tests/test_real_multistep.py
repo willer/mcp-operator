@@ -18,8 +18,9 @@ sys.path.insert(0, str(src_dir))
 # Import the modules to test
 from mcp_operator.browser import BrowserOperator, BrowserInstance
 
-# Default test settings - simpler test for automated runs
-HEADLESS_MODE = True
+# Default test settings with environment variable override
+import os
+HEADLESS_MODE = os.environ.get("TEST_HEADLESS", "true").lower() != "false"
 EXAMPLE_URL = "https://example.com"
 
 class TestRealMultistep(unittest.TestCase):
@@ -45,6 +46,9 @@ class TestRealMultistep(unittest.TestCase):
     def test_real_multistep(self):
         """Test a real multi-step browser operation using process_message"""
         # Run the async test in the loop
+        mode_str = "HEADLESS" if HEADLESS_MODE else "VISIBLE"
+        print(f"\n🔍 Running browser test in {mode_str} mode - {'browser will be invisible' if HEADLESS_MODE else 'watch your screen!'}") 
+        print(f"💡 Tip: Set TEST_HEADLESS=false to see the browser window")
         result = self.loop.run_until_complete(self._async_test_real_multistep())
         self.assertTrue(result, "Multi-step test should complete successfully")
     
@@ -61,8 +65,12 @@ class TestRealMultistep(unittest.TestCase):
             job_id = result.get("job_id")
             print(f"Browser created with job ID: {job_id}")
             
+            # Make sure browser_instance has headless mode set correctly
+            operator.browser_instance.headless = HEADLESS_MODE
+            print(f"Browser headless mode set to: {HEADLESS_MODE}")
+            
             # Define a simple task that works reliably
-            instruction = "Go to example.com and tell me the title of the page"
+            instruction = "Go to example.com and tell me the title of the page and what links are available"
             print(f"🚀 Starting multi-step task: {instruction}")
             
             # Execute the instruction
@@ -80,11 +88,15 @@ class TestRealMultistep(unittest.TestCase):
             
             # Get some result text to verify
             result_text = result.get("text", "")
-            if "Example Domain" in result_text:
-                print("✅ Found expected page title in result")
+            # Print the text for debugging
+            print(f"\nResult text: {result_text[:500]}...\n")
+            
+            # Look for evidence of page analysis
+            if "Example Domain" in result_text and "More information" in result_text:
+                print("✅ Found expected page title and link information in result")
                 success = True
             else:
-                print("❌ Did not find expected page title in result")
+                print("❌ Did not find expected page information in result")
                 
             # Clean up
             await operator.close()
