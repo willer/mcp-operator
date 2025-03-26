@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Test runner for MCP Browser Operator
 Runs both unit tests and integration tests
@@ -50,7 +50,7 @@ def main():
         print(f"Running specific test: {args.test}")
         test_suite = None
         # First try it as a class name
-        for pattern in ["test_mcp_methods.py", "test_mcp_integration.py"]:
+        for pattern in ["test_mcp_methods.py", "test_mcp_integration.py", "test_real_multistep.py"]:
             try:
                 module = loader.discover(test_dir, pattern=pattern)
                 for suite in module:

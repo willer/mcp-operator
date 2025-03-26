@@ -42,10 +42,22 @@ class TestBrowserOperatorMethods(unittest.TestCase):
     def test_list_jobs(self):
         """Test listing jobs"""
         # Create some test jobs
+        job1 = MagicMock()
+        job1.to_dict.return_value = {"job_id": "job-1", "created_at": "2023-01-01"}
+        job1.created_at = "2023-01-01"
+        
+        job2 = MagicMock()
+        job2.to_dict.return_value = {"job_id": "job-2", "created_at": "2023-01-02"}
+        job2.created_at = "2023-01-02"
+        
+        job3 = MagicMock()
+        job3.to_dict.return_value = {"job_id": "job-3", "created_at": "2023-01-03"}
+        job3.created_at = "2023-01-03"
+        
         self.browser_operator.jobs = {
-            "job-1": MagicMock(to_dict=lambda: {"job_id": "job-1", "created_at": "2023-01-01"}),
-            "job-2": MagicMock(to_dict=lambda: {"job_id": "job-2", "created_at": "2023-01-02"}),
-            "job-3": MagicMock(to_dict=lambda: {"job_id": "job-3", "created_at": "2023-01-03"})
+            "job-1": job1,
+            "job-2": job2,
+            "job-3": job3
         }
         
         # Test listing all jobs
@@ -88,7 +100,7 @@ class TestBrowserOperatorAsync(unittest.TestCase):
         self.patchers = []
         
         # Patch playwright for AsyncLocalPlaywrightComputer
-        playwright_patcher = patch("mcp_operator.cua.computer.async_playwright")
+        playwright_patcher = patch("playwright.async_api.async_playwright")
         self.mock_playwright = playwright_patcher.start()
         self.patchers.append(playwright_patcher)
         
