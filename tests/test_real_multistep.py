@@ -10,7 +10,12 @@ import argparse
 import time
 import sys
 import json
+from pathlib import Path
 from typing import Dict, Any, Optional
+
+# Ensure the src directory is in the path
+src_dir = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(src_dir))
 
 # Import the modules to test
 from mcp_operator.browser import BrowserOperator
@@ -128,8 +133,6 @@ async def test_real_multistep_operation():
         # Directly create the agent without creating an additional AsyncLocalPlaywrightComputer
         # This prevents duplicate browser instances
         from mcp_operator.cua.agent import Agent
-        
-        # Initialize an agent that uses the already initialized browser
         operator.agent = Agent(
             model="gpt-4o-mini",  # Updated to latest model
             computer=None,  # Will be set below
@@ -248,8 +251,14 @@ async def test_real_multistep_operation():
         
         # Directly call process_message which simulates what the operate-browser endpoint does
         start_time = time.time()
-        result = await operator.process_message(instruction)
-        elapsed_time = time.time() - start_time
+        try:
+            result = await operator.process_message(instruction)
+            elapsed_time = time.time() - start_time
+        except Exception as e:
+            print(f"❌ Error processing message: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
         
         # Print the results
         print("-" * 80)

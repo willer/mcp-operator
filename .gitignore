@@ -38,3 +38,9 @@ logs/
 # OS specific
 .DS_Store
 Thumbs.db
+
+# MCP Operator specific
+screenshots/
+notes/
+*.gif
+*.png

@@ -14,243 +14,21 @@ from pathlib import Path
 from urllib.parse import urlparse
 from .computer import AsyncComputer
 
-# Ensure json import is available throughout the module
-import json  # Import again to ensure it's available in all methods
-
 # Pretty print JSON objects
 def pp(obj):
     """Pretty print JSON objects"""
     print(json.dumps(obj, indent=4))
 
-# Create OpenAI API request
+# Create OpenAI Responses API request
 async def create_response(**kwargs):
     """Create a response from the OpenAI API using aiohttp with retry logic"""
-    # First try to get a specialized key for computer use API if available
-    computer_use_key = os.getenv('COMPUTER_USE_API_KEY')
-    if computer_use_key:
-        print("Found COMPUTER_USE_API_KEY environment variable, using it instead of OPENAI_API_KEY")
-        api_key = computer_use_key
-    else:
-        api_key = os.getenv('OPENAI_API_KEY')
-        
-    # Use the standard Chat Completions API endpoint
-    url = "https://api.openai.com/v1/chat/completions"
+    api_key = os.getenv('OPENAI_API_KEY')
+    url = "https://api.openai.com/v1/responses"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        "Openai-beta": "responses=v1",
     }
-    
-    # Restructure the request for the chat completions API
-    request_data = {
-        "model": kwargs.get("model", "gpt-4o-mini"),
-        "messages": [
-            {"role": "system", "content": """You are an AI assistant that can control a computer to complete tasks. 
-You can perform browser actions including navigation, clicking, typing, scrolling, etc.
-You have full control of the computer through these actions:
-- click(x, y): Click at specific coordinates
-- type(text): Type the specified text
-- keypress(keys): Press keyboard keys
-- goto(url): Navigate to a URL
-- scroll(x, y, scroll_x, scroll_y): Scroll the page
-- wait(ms): Wait for the specified milliseconds
-- move(x, y): Move the cursor
-- drag(path): Drag along a path
-- double_click(x, y): Double-click at coordinates
-- screenshot(): Take a screenshot
-
-When asked to complete a task, you should:
-1. Break down complex tasks into a series of simple browser actions
-2. Provide reasoning for each action you take
-3. Execute actions to navigate websites and interact with web content
-4. Complete the task as instructed
-
-You are fully capable of browsing the web, navigating to websites, searching, and interacting with content."""}
-        ],
-        "temperature": kwargs.get("temperature", 0.2),
-    }
-    
-    # Transform input messages to chat format
-    if "input" in kwargs:
-        for item in kwargs["input"]:
-            if "role" in item and "content" in item:
-                message = {"role": item["role"]}
-                
-                # Handle text content
-                content_list = item.get("content", [])
-                text_content = ""
-                image_content = []
-                
-                if isinstance(content_list, list):
-                    for content in content_list:
-                        if isinstance(content, dict):
-                            if content.get("type") == "input_text":
-                                text_content += content.get("text", "") + "\n"
-                            elif content.get("type") == "input_image" and "image_url" in content:
-                                # Handle image URLs (base64 format)
-                                image_url = content["image_url"]
-                                if image_url.startswith("data:image/"):
-                                    # Extract base64 data
-                                    base64_data = image_url.split(",", 1)[1] if "," in image_url else ""
-                                    if base64_data:
-                                        image_content.append({
-                                            "type": "image_url",
-                                            "image_url": {
-                                                "url": f"data:image/png;base64,{base64_data}",
-                                                "detail": "high"
-                                            }
-                                        })
-                
-                # Combine text and image content
-                if text_content and image_content:
-                    message["content"] = [{"type": "text", "text": text_content.strip()}] + image_content
-                elif image_content:
-                    message["content"] = image_content
-                elif text_content:
-                    message["content"] = text_content.strip()
-                else:
-                    message["content"] = ""
-                
-                request_data["messages"].append(message)
-    
-    # Add function definitions for computer actions    
-    # Define individual function for each computer action type, making it easier for the model
-    functions = [
-        {
-            "type": "function",
-            "function": {
-                "name": "click",
-                "description": "Click at specific x,y coordinates on the screen",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "x": {"type": "number", "description": "The x coordinate to click"},
-                        "y": {"type": "number", "description": "The y coordinate to click"},
-                        "button": {"type": "string", "enum": ["left", "right", "middle"], "description": "The mouse button to use (default: left)"}
-                    },
-                    "required": ["x", "y"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "type",
-                "description": "Type the specified text",
-                "parameters": {
-                    "type": "object", 
-                    "properties": {
-                        "text": {"type": "string", "description": "The text to type"}
-                    },
-                    "required": ["text"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "keypress",
-                "description": "Press one or more keyboard keys",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "keys": {"type": "array", "items": {"type": "string"}, "description": "The keys to press"}
-                    },
-                    "required": ["keys"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "goto",
-                "description": "Navigate to a URL",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "url": {"type": "string", "description": "The URL to navigate to"}
-                    },
-                    "required": ["url"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "scroll",
-                "description": "Scroll the page",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "x": {"type": "number", "description": "The x coordinate to scroll from"},
-                        "y": {"type": "number", "description": "The y coordinate to scroll from"},
-                        "scroll_x": {"type": "number", "description": "The amount to scroll horizontally"},
-                        "scroll_y": {"type": "number", "description": "The amount to scroll vertically"}
-                    },
-                    "required": ["x", "y", "scroll_y"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "wait",
-                "description": "Wait for specified milliseconds",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "ms": {"type": "number", "description": "The number of milliseconds to wait"}
-                    },
-                    "required": ["ms"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "move",
-                "description": "Move the cursor to specified coordinates",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "x": {"type": "number", "description": "The x coordinate to move to"},
-                        "y": {"type": "number", "description": "The y coordinate to move to"}
-                    },
-                    "required": ["x", "y"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "double_click",
-                "description": "Double-click at specific coordinates",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "x": {"type": "number", "description": "The x coordinate to double-click"},
-                        "y": {"type": "number", "description": "The y coordinate to double-click"}
-                    },
-                    "required": ["x", "y"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "screenshot",
-                "description": "Take a screenshot of the current screen",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            }
-        }
-    ]
-    
-    # Add tools to the request
-    request_data["tools"] = functions
-    request_data["tool_choice"] = "auto"
     
     max_retries = 3
     retry_delay = 2  # seconds
@@ -258,7 +36,7 @@ You are fully capable of browsing the web, navigating to websites, searching, an
     for attempt in range(max_retries):
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=request_data) as response:
+                async with session.post(url, headers=headers, json=kwargs) as response:
                     if response.status != 200:
                         error_text = await response.text()
                         print(f"Error: {response.status} {error_text}")
@@ -274,61 +52,17 @@ You are fully capable of browsing the web, navigating to websites, searching, an
                     
                     response_json = await response.json()
                     
-                    # Transform the response to match the structure expected by the agent
-                    transformed_response = {
-                        "output": []
-                    }
+                    # Verify response has expected structure
+                    if "error" in response_json:
+                        print(f"API returned error: {response_json['error']}")
+                        # Check if it's a rate limit error
+                        if "rate limit" in str(response_json['error']).lower():
+                            wait_time = retry_delay * (2 ** attempt)
+                            print(f"Rate limit hit. Waiting {wait_time}s before retry {attempt+1}/{max_retries}...")
+                            await asyncio.sleep(wait_time)
+                            continue
                     
-                    if "choices" in response_json and response_json["choices"]:
-                        choice = response_json["choices"][0]
-                        message = choice.get("message", {})
-                        
-                        # Handle regular message content
-                        if "content" in message and message["content"]:
-                            transformed_response["output"].append({
-                                "role": "assistant",
-                                "content": [{"type": "output_text", "text": message["content"]}]
-                            })
-                        
-                        # Handle tool calls (computer actions)
-                        if "tool_calls" in message and message["tool_calls"]:
-                            for tool_call in message["tool_calls"]:
-                                function_name = tool_call.get("function", {}).get("name")
-                                
-                                # Each function name corresponds to a computer action type
-                                if function_name in ["click", "type", "keypress", "scroll", "goto", 
-                                                    "wait", "move", "drag", "double_click", "screenshot"]:
-                                    try:
-                                        arguments = json.loads(tool_call["function"]["arguments"])
-                                        
-                                        # Create a computer_call item with the action type and arguments
-                                        action = {"type": function_name}
-                                        action.update(arguments)
-                                        
-                                        transformed_response["output"].append({
-                                            "type": "computer_call",
-                                            "call_id": tool_call["id"],
-                                            "action": action
-                                        })
-                                        
-                                        print(f"Successfully parsed computer action: {function_name}")
-                                        print(f"Arguments: {arguments}")
-                                    except Exception as e:
-                                        print(f"Error parsing tool call {function_name}: {e}")
-                                        
-                        # Debug what we're returning
-                        print(f"Transformed response: {len(transformed_response['output'])} items")
-                        for i, item in enumerate(transformed_response['output']):
-                            if "type" in item and item["type"] == "computer_call":
-                                print(f"  Item {i}: Computer action: {item['action']['type']}")
-                            elif "role" in item and item["role"] == "assistant":
-                                content = item.get("content", [])
-                                if isinstance(content, list) and len(content) > 0 and "text" in content[0]:
-                                    text = content[0]["text"]
-                                    preview = text[:30] + "..." if len(text) > 30 else text
-                                    print(f"  Item {i}: Assistant message: {preview}")
-                    
-                    return transformed_response
+                    return response_json
         except Exception as e:
             print(f"Network error on attempt {attempt+1}/{max_retries}: {str(e)}")
             if attempt < max_retries - 1:
@@ -345,37 +79,8 @@ You are fully capable of browsing the web, navigating to websites, searching, an
 # Check if a URL is allowed by domain rules
 def check_allowed_url(url: str, allowed_domains: List[str]) -> bool:
     """Check if URL is in allowed domains list"""
-    # Special cases
-    if url.startswith("chrome-error://"):
-        return True
-    if url.startswith("data:"):
-        return True
-    if url.startswith("about:blank"):
-        return True
-        
-    # Parse the hostname
-    try:
-        hostname = urlparse(url).hostname or ""
-        
-        # Allow localhost or 127.0.0.1
-        if hostname in ["localhost", "127.0.0.1"]:
-            return True
-            
-        # If wildcard is in allowed domains, allow all
-        if "*" in allowed_domains:
-            return True
-            
-        # Check for direct matches or subdomain matches
-        for domain in allowed_domains:
-            if hostname == domain or hostname.endswith("." + domain):
-                return True
-                
-        # No match found
-        print(f"URL not allowed: {url} - allowed domains: {allowed_domains}")
-        return False
-    except Exception as e:
-        print(f"Error checking URL: {e}")
-        return False  # Error on the side of caution
+    hostname = urlparse(url).hostname or ""
+    return any(hostname.endswith(domain) for domain in allowed_domains)
 
 class Agent:
     """Agent to manage the CUA loop and interaction with the Computer"""
@@ -386,15 +91,7 @@ class Agent:
         computer: Any = None,
         allowed_domains: List[str] = None,
     ):
-        # Check if model override is specified in environment
-        import os
-        model_override = os.getenv('COMPUTER_USE_MODEL')
-        if model_override:
-            print(f"Using model override from environment: {model_override} (was: {model})")
-            self.model = model_override
-        else:
-            self.model = model
-            
+        self.model = model
         self.computer = computer
         self.print_steps = True
         self.debug = False
@@ -407,7 +104,7 @@ class Agent:
         self.tools = []
         if computer:
             self.tools.append({
-                "type": "computer",  # Changed from computer-preview to computer
+                "type": "computer-preview",
                 "display_width": computer.dimensions[0],
                 "display_height": computer.dimensions[1],
                 "environment": computer.environment,
@@ -465,28 +162,18 @@ class Agent:
             
     async def handle_item(self, item):
         """Handle response items from the model"""
-        # Compatible with the new chat completions format
-        
-        # Check if this is a message from the assistant (regular text)
-        if "role" in item and item["role"] == "assistant" and "content" in item:
-            content_list = item.get("content", [])
-            message_text = ""
-            
-            # Extract text from content
-            if isinstance(content_list, list):
-                for content in content_list:
-                    if isinstance(content, dict) and "text" in content:
-                        message_text += content["text"] + " "
-            elif isinstance(content_list, str):
-                message_text = content_list
+        # Handle reasoning items - new format in the API
+        if item["type"] == "reasoning":
+            if "summary" in item:
+                combined_text = ""
+                for summary in item.get("summary", []):
+                    if isinstance(summary, dict) and "text" in summary:
+                        combined_text += summary["text"] + " "
+                    elif isinstance(summary, str):
+                        combined_text += summary + " "
                 
-            if message_text:
-                # Look for [REASONING] tags in the message
-                import re
-                reasoning_match = re.search(r'\[REASONING\](.*?)(?:\[ACTION\]|$)', message_text, re.DOTALL)
-                if reasoning_match:
-                    reasoning_text = reasoning_match.group(1).strip()
-                    # Store reasoning text to reference with the next action
+                if combined_text.strip():
+                    reasoning_text = combined_text.strip()
                     self.last_reasoning = reasoning_text
                     
                     if self.print_steps:
@@ -498,21 +185,47 @@ class Agent:
                         "content": reasoning_text,
                         "type": "reasoning"  # Add type to distinguish from actions
                     })
-                else:
-                    # No explicit [REASONING] tag, treat the whole message as reasoning
-                    self.last_reasoning = message_text
                     
-                    # Add to conversation history
-                    self.conversation_history.append({
-                        "role": "assistant",
-                        "content": message_text,
-                        "type": "message"
-                    })
-                
-                return []  # No output items for message
+            return []  # No output items for reasoning
+                    
+        # Parse messages for reasoning sections indicated by [REASONING] tags
+        elif item["type"] == "message":
+            if "content" in item and len(item["content"]) > 0:
+                content = item["content"][0]
+                if isinstance(content, dict) and "text" in content:
+                    message_text = content["text"]
+                    
+                    # Look for [REASONING] tags in the message
+                    import re
+                    reasoning_match = re.search(r'\[REASONING\](.*?)(?:\[ACTION\]|$)', message_text, re.DOTALL)
+                    if reasoning_match:
+                        reasoning_text = reasoning_match.group(1).strip()
+                        # Store reasoning text to reference with the next action
+                        self.last_reasoning = reasoning_text
+                        
+                        if self.print_steps:
+                            print(f"Reasoning: {reasoning_text}")
+                        
+                        # Add reasoning to conversation history
+                        self.conversation_history.append({
+                            "role": "assistant",
+                            "content": reasoning_text,
+                            "type": "reasoning"  # Add type to distinguish from actions
+                        })
+                    else:
+                        # No explicit [REASONING] tag, treat the whole message as reasoning
+                        self.last_reasoning = message_text
+                        
+                        # Add to conversation history
+                        self.conversation_history.append({
+                            "role": "assistant",
+                            "content": message_text,
+                            "type": "message"
+                        })
+                    
+                    return []  # No output items for message
         
-        # Handle computer_call items
-        elif "type" in item and item["type"] == "computer_call":
+        elif item["type"] == "computer_call":
             action = item["action"]
             action_type = action["type"]
             action_args = {k: v for k, v in action.items() if k != "type"}
@@ -586,37 +299,6 @@ class Agent:
                     
             return [call_output]
             
-        # Handle reasoning items (explicit reasoning type, deprecated but kept for compat)
-        elif "type" in item and item["type"] == "reasoning":
-            if "summary" in item:
-                combined_text = ""
-                for summary in item.get("summary", []):
-                    if isinstance(summary, dict) and "text" in summary:
-                        combined_text += summary["text"] + " "
-                    elif isinstance(summary, str):
-                        combined_text += summary + " "
-                
-                if combined_text.strip():
-                    reasoning_text = combined_text.strip()
-                    self.last_reasoning = reasoning_text
-                    
-                    if self.print_steps:
-                        print(f"Reasoning: {reasoning_text}")
-                    
-                    # Add reasoning to conversation history
-                    self.conversation_history.append({
-                        "role": "assistant",
-                        "content": reasoning_text,
-                        "type": "reasoning"  # Add type to distinguish from actions
-                    })
-                    
-            return []  # No output items for reasoning
-        
-        # For items that don't match our known formats, log a warning and skip
-        else:
-            if self.debug:
-                print(f"Unhandled item type: {item}")
-            
         return []
                 
     async def run_full_turn(self, input_items, print_steps=True, debug=False):
@@ -640,17 +322,13 @@ class Agent:
                                 if "Looking at the current screen" in text and "Test requirements:" in text:
                                     print(f"\n--- SENDING EVALUATION REQUEST TO MODEL ---\n")
             
-            # Add debug information
-            if debug:
-                print(f"Using model: {self.model}")
-                print(f"Tools configuration: {json.dumps(self.tools, indent=2)}")
-                
             response = await create_response(
                 model=self.model,
                 input=input_items + new_items,
                 tools=self.tools,
                 truncation="auto",
                 temperature=0.2,  # Small amount of temperature to avoid deterministic errors
+                # Note: timeout parameter removed as it's not supported by the API
             )
             
             # Print the response structure for debugging
@@ -795,76 +473,16 @@ class Agent:
                 # Add the model's output to our items
                 new_items += response["output"]
                 
-                # Debug print the output items for troubleshooting
-                if response["output"]:
-                    print(f"MODEL OUTPUT ITEMS: {len(response['output'])} items")
-                    # Skip detailed JSON dump for now
-                    
-                    # More detailed output
-                    for i, item in enumerate(response["output"]):
-                        item_type = item.get("type", "unknown")
-                        role = item.get("role", "none")
-                        
-                        # For computer_call items, show action type
-                        if item_type == "computer_call" and "action" in item:
-                            action = item["action"]
-                            action_type = action.get("type", "unknown")
-                            print(f"  Item {i}: type={item_type}, action_type={action_type}")
-                        else:
-                            print(f"  Item {i}: type={item_type}, role={role}")
-                            # For assistant messages, show a preview
-                            if role == "assistant" and "content" in item:
-                                content = item.get("content", [])
-                                if isinstance(content, list) and len(content) > 0:
-                                    if isinstance(content[0], dict) and "text" in content[0]:
-                                        text = content[0]["text"]
-                                        preview = text[:50] + "..." if len(text) > 50 else text
-                                        print(f"    Content preview: {preview}")
-                else:
-                    print("WARNING: Model returned empty output list")
-                
                 # If model wasn't asking a question, handle the items
                 if not model_asking_question:
-                    # Sort items to handle computer_call items first
-                    sorted_items = []
-                    computer_call_items = []
-                    other_items = []
-                    
-                    # First segregate items by type
-                    for item in response["output"]:
-                        if item.get("type") == "computer_call":
-                            computer_call_items.append(item)
-                        else:
-                            other_items.append(item)
-                    
-                    # Handle computer calls first
-                    print(f"Processing {len(computer_call_items)} computer_call items")
+                    # Handle computer calls last
                     for item in computer_call_items:
-                        try:
-                            print(f"Executing computer action: {item.get('action', {}).get('type', 'unknown')}")
-                            result_items = await self.handle_item(item)
-                            print(f"Processed computer_call, got {len(result_items)} result items")
-                            new_items += result_items
-                        except Exception as e:
-                            print(f"Error processing computer_call item: {str(e)}")
-                            import traceback
-                            print(traceback.format_exc())
+                        new_items += await self.handle_item(item)
                     
                     # Handle other items
-                    print(f"Processing {len(other_items)} other items")
                     for item in other_items:
                         if item.get("type") != "reasoning":  # Skip reasoning items (already handled)
-                            try:
-                                item_type = item.get("type", "unknown") 
-                                role = item.get("role", "none")
-                                print(f"Processing item: type={item_type}, role={role}")
-                                result_items = await self.handle_item(item)
-                                print(f"Processed {item_type} item, got {len(result_items)} result items")
-                                new_items += result_items
-                            except Exception as e:
-                                print(f"Error processing {item.get('type', 'unknown')} item: {str(e)}")
-                                import traceback
-                                print(traceback.format_exc())
+                            new_items += await self.handle_item(item)
                     
         return new_items
         
@@ -1519,8 +1137,8 @@ class Agent:
                 print(f"Found URL in task: {url}")
                 return url
         
-        # Look for common URL patterns in the task with full URLs
-        url_patterns_with_protocol = [
+        # Look for common URL patterns in the task
+        url_patterns = [
             r"Navigate to (https?://[^\s]+)",
             r"Go to (https?://[^\s]+)",
             r"Visit (https?://[^\s]+)",
@@ -1530,31 +1148,13 @@ class Agent:
             r"Navigate to the URL ([^\s]+)"
         ]
         
-        for pattern in url_patterns_with_protocol:
+        for pattern in url_patterns:
             match = re.search(pattern, task)
             if match:
                 url = match.group(1)
                 # Strip any punctuation that might have been included
                 url = url.rstrip('.,;:)')
                 print(f"Found URL from pattern match: {url}")
-                return url
-        
-        # Look for common URL patterns WITHOUT protocol (e.g., "Go to google.com")
-        url_patterns_without_protocol = [
-            r"Navigate to ([a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9-]*(?:\.[a-zA-Z0-9][a-zA-Z0-9-]*)+)",
-            r"Go to ([a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9-]*(?:\.[a-zA-Z0-9][a-zA-Z0-9-]*)+)",
-            r"Visit ([a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9-]*(?:\.[a-zA-Z0-9][a-zA-Z0-9-]*)+)",
-            r"Open ([a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9-]*(?:\.[a-zA-Z0-9][a-zA-Z0-9-]*)+)",
-            r"Access ([a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9-]*(?:\.[a-zA-Z0-9][a-zA-Z0-9-]*)+)"
-        ]
-        
-        for pattern in url_patterns_without_protocol:
-            match = re.search(pattern, task, re.IGNORECASE)
-            if match:
-                domain = match.group(1)
-                # Add https:// protocol
-                url = f"https://{domain}"
-                print(f"Found domain from pattern match: {domain} -> {url}")
                 return url
         
         # If no URL found, extract from the base_url that was added to the task
@@ -1583,14 +1183,6 @@ class Agent:
             url = matches[0].rstrip('.,;:)')
             print(f"Found URL via general regex: {url}")
             return url
-            
-        # Look for common domain names mentioned in the task
-        common_domains = ['google.com', 'wikipedia.org', 'cnn.com', 'yahoo.com', 'amazon.com', 'bing.com']
-        for domain in common_domains:
-            if domain.lower() in task.lower():
-                full_url = f"https://{domain}"
-                print(f"Found common domain in task: {domain} -> {full_url}")
-                return full_url
             
         # If no URL found, check for domain references that might indicate a URL
         for domain in self.allowed_domains:

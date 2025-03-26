@@ -1,844 +1,668 @@
-import asyncio
-import base64
-import sys
-import logging
-import json
+#!/usr/bin/env python3
+"""
+MCP Server implementation for the Browser Operator
+"""
+
 import os
-import uuid
-import time
-from typing import Dict, Any, Optional, List, Tuple
+import sys
+import json
+import asyncio
+import signal
+from datetime import datetime
+from typing import Dict, Any, List, Optional, Union, Tuple
+import logging
+from pathlib import Path
 
-from mcp.server.models import InitializationOptions
-import mcp.types as types
-from mcp.server import NotificationOptions, Server
-from pydantic import AnyUrl
-import mcp.server.stdio
+# Set up logging to avoid interfering with MCP protocol
+log_dir = Path(os.environ.get("MCP_LOG_DIR", "logs"))
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / f"mcp_server_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
-# Set up logging to file to avoid stdout pollution
-log_dir = os.path.join(os.path.expanduser("~"), ".mcp-operator-logs")
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, "mcp-operator.log")
-
+# Configure logging to file only (no stdout)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler(log_file),
+        # No stream handler to avoid interfering with MCP
     ]
 )
 
-# Note: We should never use print() statements in this codebase.
-# Always use the logger module for any diagnostic output.
-# Ensure we don't output anything to stdout/stderr in the logger
-for handler in logging.root.handlers[:]:
-    if isinstance(handler, logging.StreamHandler):
-        logging.root.removeHandler(handler)
+logger = logging.getLogger("mcp-server")
 
-# Create our logger that only writes to file
-logger = logging.getLogger('mcp-operator')
+# Import our browser operator
+from mcp_operator.browser import BrowserOperator
 
-# Import the rewired browser operator that uses the CUA implementation
-from .browser import BrowserOperator
-
-# Store notes as a simple key-value dict to demonstrate state management
-notes: dict[str, str] = {}
-# Initialize browser operator
-browser_operators: dict[str, BrowserOperator] = {}
-
-# Job tracking system
-class JobStatus:
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    TIMEOUT = "timeout"
-
-class JobManager:
+class MCPServer:
+    """MCP Server implementation for Browser Operator"""
+    
     def __init__(self):
-        self.jobs: Dict[str, Dict[str, Any]] = {}
-        self.job_tasks: Dict[str, asyncio.Task] = {}
-        self.cleanup_task = None
+        """Initialize the MCP server"""
+        # Dictionary of browser operators keyed by project name
+        self.operators: Dict[str, BrowserOperator] = {}
         
-    def start_cleanup_task(self):
-        """Start a background task to clean up old jobs"""
-        if self.cleanup_task is None:
-            self.cleanup_task = asyncio.create_task(self._cleanup_old_jobs())
+        # Request ID counter
+        self.request_counter = 0
         
-    async def _cleanup_old_jobs(self):
-        """Periodically clean up old completed jobs"""
-        while True:
-            try:
-                current_time = time.time()
-                to_delete = []
-                
-                for job_id, job_info in self.jobs.items():
-                    # Remove jobs that are complete/failed and older than 1 hour
-                    if (job_info["status"] in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.TIMEOUT] and
-                        current_time - job_info["updated_at"] > 3600):
-                        to_delete.append(job_id)
-                
-                for job_id in to_delete:
-                    del self.jobs[job_id]
-                    logger.info(f"Cleaned up old job: {job_id}")
-                
-                await asyncio.sleep(300)  # Check every 5 minutes
-            except Exception as e:
-                logger.error(f"Error in job cleanup: {str(e)}")
-                await asyncio.sleep(60)  # Wait and retry
+        logger.info("MCP Server initialized")
     
-    def create_job(self, operation_type: str, description: str, **metadata) -> str:
-        """Create a new job and return its ID"""
-        job_id = str(uuid.uuid4())
-        self.jobs[job_id] = {
-            "id": job_id,
-            "operation_type": operation_type,
-            "description": description,
-            "status": JobStatus.PENDING,
-            "result": None,
-            "error": None,
-            "created_at": time.time(),
-            "updated_at": time.time(),
-            "metadata": metadata
+    def _get_operator(self, project_name: str) -> BrowserOperator:
+        """Get or create a browser operator for a project
+        
+        Args:
+            project_name: Name of the project
+            
+        Returns:
+            BrowserOperator instance
+        """
+        if project_name not in self.operators:
+            logger.info(f"Creating new operator for project: {project_name}")
+            self.operators[project_name] = BrowserOperator(project_name)
+        
+        return self.operators[project_name]
+    
+    def _generate_request_id(self) -> str:
+        """Generate a unique request ID
+        
+        Returns:
+            Request ID string
+        """
+        self.request_counter += 1
+        return f"mcp-req-{self.request_counter}"
+    
+    def _generate_error_response(self, request_id: str, error_message: str, error_code: int = -32000) -> Dict[str, Any]:
+        """Generate a JSON-RPC error response
+        
+        Args:
+            request_id: ID of the request
+            error_message: Error message
+            error_code: JSON-RPC error code
+            
+        Returns:
+            JSON-RPC error response dict
+        """
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {
+                "code": error_code,
+                "message": error_message
+            }
         }
-        return job_id
     
-    def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get job information by ID"""
-        return self.jobs.get(job_id)
-    
-    def list_jobs(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """List recent jobs, newest first"""
-        sorted_jobs = sorted(
-            self.jobs.values(), 
-            key=lambda x: x["updated_at"], 
-            reverse=True
-        )
-        return sorted_jobs[:limit]
-    
-    def update_job_status(self, job_id: str, status: str) -> None:
-        """Update a job's status"""
-        if job_id in self.jobs:
-            self.jobs[job_id]["status"] = status
-            self.jobs[job_id]["updated_at"] = time.time()
-    
-    def set_job_result(self, job_id: str, result: Any) -> None:
-        """Set a job's result and mark as completed"""
-        if job_id in self.jobs:
-            self.jobs[job_id]["result"] = result
-            self.jobs[job_id]["status"] = JobStatus.COMPLETED
-            self.jobs[job_id]["updated_at"] = time.time()
-    
-    def set_job_error(self, job_id: str, error: str) -> None:
-        """Set a job's error and mark as failed"""
-        if job_id in self.jobs:
-            self.jobs[job_id]["error"] = error
-            self.jobs[job_id]["status"] = JobStatus.FAILED
-            self.jobs[job_id]["updated_at"] = time.time()
-    
-    def set_job_timeout(self, job_id: str, reason: str) -> None:
-        """Mark a job as timed out"""
-        if job_id in self.jobs:
-            self.jobs[job_id]["error"] = reason
-            self.jobs[job_id]["status"] = JobStatus.TIMEOUT
-            self.jobs[job_id]["updated_at"] = time.time()
-    
-    async def run_job(self, job_id: str, coroutine) -> None:
-        """Run a job as a background task"""
-        if job_id not in self.jobs:
-            logger.error(f"Attempting to run non-existent job: {job_id}")
-            return
+    def _generate_success_response(self, request_id: str, result: Any) -> Dict[str, Any]:
+        """Generate a JSON-RPC success response
         
-        self.update_job_status(job_id, JobStatus.RUNNING)
+        Args:
+            request_id: ID of the request
+            result: Result data
+            
+        Returns:
+            JSON-RPC success response dict
+        """
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": result
+        }
+    
+    async def dispatch_method(self, method: str, params: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+        """Dispatch a method call to the appropriate handler
         
+        Args:
+            method: Method name to call
+            params: Method parameters
+            request_id: ID of this request
+            
+        Returns:
+            JSON-RPC response dict
+        """
+        # Map method names to handler functions
+        method_map = {
+            "mcp__browser-operator__create-browser": self.handle_create_browser,
+            "mcp__browser-operator__navigate-browser": self.handle_navigate_browser,
+            "mcp__browser-operator__operate-browser": self.handle_operate_browser,
+            "mcp__browser-operator__close-browser": self.handle_close_browser,
+            "mcp__browser-operator__get-job-status": self.handle_get_job_status,
+            "mcp__browser-operator__list-jobs": self.handle_list_jobs,
+            "mcp__browser-operator__add-note": self.handle_add_note,
+            
+            # Browser tools
+            "mcp__browser-tools__getConsoleLogs": self.handle_get_console_logs,
+            "mcp__browser-tools__getConsoleErrors": self.handle_get_console_errors,
+            "mcp__browser-tools__getNetworkErrors": self.handle_get_network_errors,
+            "mcp__browser-tools__getNetworkLogs": self.handle_get_network_logs,
+            "mcp__browser-tools__takeScreenshot": self.handle_take_screenshot,
+            "mcp__browser-tools__getSelectedElement": self.handle_get_selected_element,
+            "mcp__browser-tools__wipeLogs": self.handle_wipe_logs,
+            
+            # Audit tools
+            "mcp__browser-tools__runAccessibilityAudit": self.handle_run_accessibility_audit,
+            "mcp__browser-tools__runPerformanceAudit": self.handle_run_performance_audit,
+            "mcp__browser-tools__runSEOAudit": self.handle_run_seo_audit,
+            "mcp__browser-tools__runNextJSAudit": self.handle_run_nextjs_audit,
+            "mcp__browser-tools__runBestPracticesAudit": self.handle_run_best_practices_audit,
+            "mcp__browser-tools__runDebuggerMode": self.handle_run_debugger_mode,
+            "mcp__browser-tools__runAuditMode": self.handle_run_audit_mode
+        }
+        
+        # Check if method exists
+        if method not in method_map:
+            logger.error(f"Unknown method: {method}")
+            return self._generate_error_response(
+                request_id,
+                f"Method not found: {method}",
+                -32601  # Method not found error code
+            )
+        
+        # Call the handler
         try:
-            # Start the task and store it for management
-            task = asyncio.create_task(coroutine)
-            self.job_tasks[job_id] = task
-            
-            # Wait for it to complete
-            result = await task
-            
-            # Update the job with the result
-            self.set_job_result(job_id, result)
-            logger.info(f"Job {job_id} completed successfully")
-            
-        except asyncio.TimeoutError:
-            self.set_job_timeout(job_id, "Operation timed out")
-            logger.warning(f"Job {job_id} timed out")
-            
-        except asyncio.CancelledError:
-            self.set_job_error(job_id, "Operation was cancelled")
-            logger.warning(f"Job {job_id} was cancelled")
-            
+            handler = method_map[method]
+            result = await handler(params)
+            return self._generate_success_response(request_id, result)
         except Exception as e:
-            self.set_job_error(job_id, str(e))
-            logger.error(f"Job {job_id} failed with error: {str(e)}")
-            
-        finally:
-            # Clean up the task reference
-            if job_id in self.job_tasks:
-                del self.job_tasks[job_id]
-
-# Initialize the job manager
-job_manager = JobManager()
-
-server = Server("mcp-operator")
-
-@server.list_resources()
-async def handle_list_resources() -> list[types.Resource]:
-    """
-    List available note resources.
-    Each note is exposed as a resource with a custom note:// URI scheme.
-    """
-    return [
-        types.Resource(
-            uri=AnyUrl(f"note://internal/{name}"),
-            name=f"Note: {name}",
-            description=f"A simple note named {name}",
-            mimeType="text/plain",
-        )
-        for name in notes
-    ]
-
-@server.read_resource()
-async def handle_read_resource(uri: AnyUrl) -> str:
-    """
-    Read a specific note's content by its URI.
-    The note name is extracted from the URI host component.
-    """
-    if uri.scheme != "note":
-        raise ValueError(f"Unsupported URI scheme: {uri.scheme}")
-
-    name = uri.path
-    if name is not None:
-        name = name.lstrip("/")
-        return notes[name]
-    raise ValueError(f"Note not found: {name}")
-
-@server.list_prompts()
-async def handle_list_prompts() -> list[types.Prompt]:
-    """
-    List available prompts.
-    Each prompt can have optional arguments to customize its behavior.
-    """
-    return [
-        types.Prompt(
-            name="summarize-notes",
-            description="Creates a summary of all notes",
-            arguments=[
-                types.PromptArgument(
-                    name="style",
-                    description="Style of the summary (brief/detailed)",
-                    required=False,
-                )
-            ],
-        )
-    ]
-
-@server.get_prompt()
-async def handle_get_prompt(
-    name: str, arguments: dict[str, str] | None
-) -> types.GetPromptResult:
-    """
-    Generate a prompt by combining arguments with server state.
-    The prompt includes all current notes and can be customized via arguments.
-    """
-    if name != "summarize-notes":
-        raise ValueError(f"Unknown prompt: {name}")
-
-    style = (arguments or {}).get("style", "brief")
-    detail_prompt = " Give extensive details." if style == "detailed" else ""
-
-    return types.GetPromptResult(
-        description="Summarize the current notes",
-        messages=[
-            types.PromptMessage(
-                role="user",
-                content=types.TextContent(
-                    type="text",
-                    text=f"Here are the current notes to summarize:{detail_prompt}\n\n"
-                    + "\n".join(
-                        f"- {name}: {content}"
-                        for name, content in notes.items()
-                    ),
-                ),
+            logger.exception(f"Error handling method: {method}")
+            return self._generate_error_response(
+                request_id,
+                f"Error executing method: {str(e)}"
             )
-        ],
-    )
-
-@server.list_tools()
-async def handle_list_tools() -> list[types.Tool]:
-    """
-    List available tools.
-    Each tool specifies its arguments using JSON Schema validation.
-    """
-    return [
-        # Browser operation tools with async job support
-        types.Tool(
-            name="create-browser",
-            description="Create a new browser instance (returns a job_id for tracking)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string", "description": "Project name for browser state identification and persistence"},
-                },
-                "required": ["project_name"],
-            },
-        ),
-        types.Tool(
-            name="navigate-browser",
-            description="Navigate to a URL in the browser (returns a job_id for tracking)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string"},
-                    "url": {"type": "string"},
-                },
-                "required": ["project_name", "url"],
-            },
-        ),
-        types.Tool(
-            name="operate-browser",
-            description="Operate the browser based on a natural language instruction (returns a job_id for tracking)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string"},
-                    "instruction": {"type": "string"},
-                },
-                "required": ["project_name", "instruction"],
-            },
-        ),
-        types.Tool(
-            name="close-browser",
-            description="Close a browser instance (returns a job_id for tracking)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string"},
-                },
-                "required": ["project_name"],
-            },
-        ),
-        
-        # Job management tools
-        types.Tool(
-            name="get-job-status",
-            description="Get the status and result of a job by its ID",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "job_id": {"type": "string"},
-                },
-                "required": ["job_id"],
-            },
-        ),
-        types.Tool(
-            name="list-jobs",
-            description="List recent browser operation jobs",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "limit": {"type": "number", "description": "Maximum number of jobs to return (default: 10)"},
-                },
-                "required": [],
-            },
-        ),
-        
-        # Note management tools (original functionality)
-        types.Tool(
-            name="add-note",
-            description="Add a new note",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "content": {"type": "string"},
-                },
-                "required": ["name", "content"],
-            },
-        )
-    ]
-
-@server.call_tool()
-async def handle_call_tool(
-    name: str, arguments: dict | None
-) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
-    """
-    Handle tool execution requests.
-    Tools can modify server state and notify clients of changes.
     
-    For long-running browser operations, we use a job-based approach:
-    1. Client calls a tool like "operate-browser"
-    2. Server immediately returns a job_id
-    3. Operation continues in the background
-    4. Client can poll using get-job-status to check when done
-    """
-    logger.info(f"Tool requested: {name} with arguments: {arguments}")
-    
-    if not arguments and name not in ["list-jobs"]:
-        raise ValueError("Missing arguments")
-    
-    # Helper to format job status for response
-    def format_job_status(job_info: Dict[str, Any]) -> List[types.TextContent]:
-        """Format job info into a nice response"""
-        job_id = job_info["id"]
-        status = job_info["status"]
-        created = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(job_info["created_at"]))
-        updated = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(job_info["updated_at"]))
+    async def handle_request(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle a JSON-RPC request
         
-        # Build response text
-        result_text = f"Job ID: {job_id}\nStatus: {status}\nCreated: {created}\nUpdated: {updated}\n"
-        
-        # Add operation details
-        result_text += f"Operation: {job_info['operation_type']}\n"
-        result_text += f"Description: {job_info['description']}\n"
-        
-        # Add error message if there is one
-        if job_info.get("error"):
-            result_text += f"Error: {job_info['error']}\n"
+        Args:
+            request_data: JSON-RPC request data
             
-        # Add metadata if available
-        if job_info.get("metadata"):
-            result_text += "\nMetadata:\n"
-            for key, value in job_info["metadata"].items():
-                result_text += f"  {key}: {value}\n"
-        
-        response = [
-            types.TextContent(
-                type="text",
-                text=result_text,
+        Returns:
+            JSON-RPC response dict
+        """
+        # Validate JSON-RPC request
+        if "jsonrpc" not in request_data or request_data["jsonrpc"] != "2.0":
+            logger.error("Invalid JSON-RPC version")
+            return self._generate_error_response(
+                request_data.get("id", ""),
+                "Invalid JSON-RPC version",
+                -32600  # Invalid request error code
             )
-        ]
         
-        # If job is complete and has result with screenshot, add it
-        if status == JobStatus.COMPLETED and job_info.get("result"):
-            result = job_info["result"]
-            if isinstance(result, list) and len(result) > 0:
-                # Add all text content first
-                for item in result:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        response.append(
-                            types.TextContent(
-                                type="text",
-                                text=item["text"],
-                            )
-                        )
-                
-                # Then add the first image if available (to keep response size reasonable)
-                for item in result:
-                    if isinstance(item, dict) and item.get("type") == "image" and item.get("data"):
-                        try:
-                            response.append(
-                                types.ImageContent(
-                                    type="image",
-                                    data=item["data"],
-                                    mimeType=item.get("mimeType", "image/png"),
-                                )
-                            )
-                            break  # Only add the first image
-                        except Exception as e:
-                            response.append(
-                                types.TextContent(
-                                    type="text",
-                                    text=f"Could not process image: {str(e)}",
-                                )
-                            )
+        if "method" not in request_data:
+            logger.error("Missing method field")
+            return self._generate_error_response(
+                request_data.get("id", ""),
+                "Missing method field",
+                -32600  # Invalid request error code
+            )
         
+        # Extract request data
+        method = request_data["method"]
+        params = request_data.get("params", {})
+        request_id = request_data.get("id", self._generate_request_id())
+        
+        logger.info(f"Request: {request_id} - {method}")
+        logger.debug(f"Params: {params}")
+        
+        # Dispatch to method handler
+        response = await self.dispatch_method(method, params, request_id)
+        
+        logger.info(f"Response: {request_id} - {method} - {'Success' if 'result' in response else 'Error'}")
         return response
     
-    # Job management tools
-    if name == "get-job-status":
-        job_id = arguments.get("job_id")
+    # Browser operator handlers
+    
+    async def handle_create_browser(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle create-browser request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Response data
+        """
+        project_name = params.get("project_name", "")
+        if not project_name:
+            logger.error("Missing project_name parameter")
+            raise ValueError("Missing project_name parameter")
+        
+        operator = self._get_operator(project_name)
+        return await operator.create_browser()
+    
+    async def handle_navigate_browser(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle navigate-browser request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Response data
+        """
+        project_name = params.get("project_name", "")
+        url = params.get("url", "")
+        
+        if not project_name:
+            logger.error("Missing project_name parameter")
+            raise ValueError("Missing project_name parameter")
+        
+        if not url:
+            logger.error("Missing url parameter")
+            raise ValueError("Missing url parameter")
+        
+        operator = self._get_operator(project_name)
+        return await operator.navigate_browser(url)
+    
+    async def handle_operate_browser(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle operate-browser request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Response data
+        """
+        project_name = params.get("project_name", "")
+        instruction = params.get("instruction", "")
+        
+        if not project_name:
+            logger.error("Missing project_name parameter")
+            raise ValueError("Missing project_name parameter")
+        
+        if not instruction:
+            logger.error("Missing instruction parameter")
+            raise ValueError("Missing instruction parameter")
+        
+        operator = self._get_operator(project_name)
+        return await operator.operate_browser(instruction)
+    
+    async def handle_close_browser(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle close-browser request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Response data
+        """
+        project_name = params.get("project_name", "")
+        
+        if not project_name:
+            logger.error("Missing project_name parameter")
+            raise ValueError("Missing project_name parameter")
+        
+        operator = self._get_operator(project_name)
+        result = await operator.close()
+        
+        # Remove the operator from our mapping
+        if project_name in self.operators:
+            del self.operators[project_name]
+        
+        return result
+    
+    async def handle_get_job_status(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle get-job-status request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Response data with job status
+        """
+        job_id = params.get("job_id", "")
+        
         if not job_id:
+            logger.error("Missing job_id parameter")
             raise ValueError("Missing job_id parameter")
         
-        job_info = job_manager.get_job(job_id)
-        if not job_info:
-            return [
-                types.TextContent(
-                    type="text",
-                    text=f"Job with ID {job_id} not found",
-                )
-            ]
+        # Search for the job in all operators
+        for project_name, operator in self.operators.items():
+            if job_id in operator.jobs:
+                return operator.get_job_status(job_id)
         
-        return format_job_status(job_info)
+        # Job not found
+        logger.error(f"Job not found: {job_id}")
+        return {"error": f"Job not found: {job_id}"}
     
-    elif name == "list-jobs":
-        limit = arguments.get("limit", 10) if arguments else 10
-        jobs = job_manager.list_jobs(limit=limit)
+    async def handle_list_jobs(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Handle list-jobs request
         
-        if not jobs:
-            return [
-                types.TextContent(
-                    type="text",
-                    text="No jobs found",
-                )
-            ]
+        Args:
+            params: Request parameters
+            
+        Returns:
+            List of recent jobs
+        """
+        limit = params.get("limit", 10)
         
-        # Create a summary list
-        summary_text = f"Recent Jobs (showing {len(jobs)} of {len(job_manager.jobs)}):\n\n"
-        for job in jobs:
-            job_time = time.strftime("%H:%M:%S", time.localtime(job["updated_at"]))
-            summary_text += f"• {job['id']} - {job['status']} - {job['operation_type']} - {job['description']} ({job_time})\n"
+        # Collect jobs from all operators
+        all_jobs = []
+        for project_name, operator in self.operators.items():
+            all_jobs.extend(operator.list_jobs(limit=limit))
         
-        return [
-            types.TextContent(
-                type="text",
-                text=summary_text,
-            )
-        ]
+        # Sort by creation time (newest first) and limit
+        sorted_jobs = sorted(
+            all_jobs,
+            key=lambda job: job.get("created_at", ""),
+            reverse=True
+        )[:limit]
+        
+        return sorted_jobs
     
-    # Note management tool
-    elif name == "add-note":
-        note_name = arguments.get("name")
-        note_content = arguments.get("content")
+    async def handle_add_note(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle add-note request
         
-        if not note_name or not note_content:
-            raise ValueError("Missing name or content parameters")
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Response data
+        """
+        name = params.get("name", "")
+        content = params.get("content", "")
         
-        notes[note_name] = note_content
+        if not name:
+            logger.error("Missing name parameter")
+            raise ValueError("Missing name parameter")
         
-        return [
-            types.TextContent(
-                type="text",
-                text=f"Note '{note_name}' added successfully",
-            )
-        ]
+        if not content:
+            logger.error("Missing content parameter")
+            raise ValueError("Missing content parameter")
+        
+        # Use the first available operator to add the note
+        # This is a simplification - ideally we should store notes independently
+        if not self.operators:
+            # Create a default operator if none exists
+            default_project = "default-project"
+            self.operators[default_project] = BrowserOperator(default_project)
+        
+        project_name = next(iter(self.operators.keys()))
+        operator = self.operators[project_name]
+        return await operator.add_note(name, content)
     
-    # Browser operation tools - these now create jobs and return immediately
-    elif name == "create-browser":
-        project_name = arguments.get("project_name")
-        if not project_name:
-            raise ValueError("Missing project_name")
+    # Browser tools handlers
+    
+    async def _get_active_operator(self) -> Tuple[str, BrowserOperator]:
+        """Get an active operator, or create one if none exists
         
-        # Check if browser already exists
-        if project_name in browser_operators:
-            return [
-                types.TextContent(
-                    type="text",
-                    text=f"Browser for project '{project_name}' already exists. Close the existing browser first or use a different project name.",
-                )
-            ]
+        Returns:
+            Tuple of (project_name, operator)
+        """
+        if not self.operators:
+            # Create a default operator if none exists
+            default_project = "default-project"
+            self.operators[default_project] = BrowserOperator(default_project)
+            return default_project, self.operators[default_project]
         
-        # Create a new job for the browser creation operation
-        job_id = job_manager.create_job(
-            operation_type="create-browser",
-            description=f"Create browser instance for project: {project_name}",
-            project_name=project_name
-        )
+        # Return the first operator that has an initialized browser
+        for project_name, operator in self.operators.items():
+            if operator.browser_instance and operator.browser_instance.initialized:
+                return project_name, operator
         
-        # Define the async function that will run in the background
-        async def create_browser_job():
+        # If no initialized browsers, return the first operator
+        project_name = next(iter(self.operators.keys()))
+        return project_name, self.operators[project_name]
+    
+    async def handle_get_console_logs(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Handle getConsoleLogs request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            List of console log entries
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.get_console_logs()
+    
+    async def handle_get_console_errors(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Handle getConsoleErrors request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            List of console error entries
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.get_console_errors()
+    
+    async def handle_get_network_errors(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Handle getNetworkErrors request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            List of network error entries
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.get_network_errors()
+    
+    async def handle_get_network_logs(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Handle getNetworkLogs request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            List of network log entries
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.get_network_logs()
+    
+    async def handle_take_screenshot(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle takeScreenshot request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Dict with screenshot data
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.take_screenshot()
+    
+    async def handle_get_selected_element(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle getSelectedElement request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Dict with element information
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.get_selected_element()
+    
+    async def handle_wipe_logs(self, params: Dict[str, Any]) -> Dict[str, str]:
+        """Handle wipeLogs request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Dict with status message
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.wipe_logs()
+    
+    # Audit tools handlers
+    
+    async def handle_run_accessibility_audit(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle runAccessibilityAudit request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Dict with accessibility audit results
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.run_accessibility_audit()
+    
+    async def handle_run_performance_audit(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle runPerformanceAudit request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Dict with performance audit results
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.run_performance_audit()
+    
+    async def handle_run_seo_audit(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle runSEOAudit request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Dict with SEO audit results
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.run_seo_audit()
+    
+    async def handle_run_nextjs_audit(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle runNextJSAudit request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Dict with NextJS audit results
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.run_nextjs_audit()
+    
+    async def handle_run_best_practices_audit(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle runBestPracticesAudit request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Dict with best practices audit results
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.run_best_practices_audit()
+    
+    async def handle_run_debugger_mode(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle runDebuggerMode request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Dict with debug information
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.run_debugger_mode()
+    
+    async def handle_run_audit_mode(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle runAuditMode request
+        
+        Args:
+            params: Request parameters
+            
+        Returns:
+            Dict with comprehensive audit results
+        """
+        _, operator = await self._get_active_operator()
+        return await operator.run_audit_mode()
+    
+    # Main server loop
+    
+    async def listen(self):
+        """Listen for incoming MCP requests from stdin"""
+        logger.info("Starting MCP server")
+        while True:
             try:
-                # Create a new browser operator with project-based persistence
-                browser_operator = BrowserOperator(project_name)
-                success = await browser_operator.initialize()
+                # Read a line from stdin
+                line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
                 
-                if not success:
-                    return [{
-                        "type": "text",
-                        "text": f"Error creating browser for project: {project_name}. Check logs for details.",
-                    }]
+                if not line:
+                    # EOF received, exit
+                    logger.info("Received EOF, shutting down")
+                    break
                 
-                browser_operators[project_name] = browser_operator
-                
-                # Take initial screenshot to show
-                screenshot = await browser_operator.browser_instance.take_screenshot()
-                
-                response = [
-                    {
-                        "type": "text",
-                        "text": f"Created browser for project: {project_name}",
-                    }
-                ]
-                
-                if screenshot:
-                    try:
-                        response.append({
-                            "type": "image",
-                            "data": screenshot,  # Already base64-encoded
-                            "mimeType": "image/png",
-                        })
-                    except Exception as e:
-                        response.append({
-                            "type": "text",
-                            "text": f"Could not process screenshot: {str(e)}",
-                        })
+                # Parse JSON request
+                try:
+                    request_data = json.loads(line)
+                    logger.debug(f"Received request: {request_data}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON request: {e}")
+                    response = self._generate_error_response(
+                        "",  # No ID available for invalid JSON
+                        f"Invalid JSON request: {str(e)}",
+                        -32700  # Parse error code
+                    )
                 else:
-                    response.append({
-                        "type": "text",
-                        "text": "Could not take initial screenshot.",
-                    })
-                    
-                return response
+                    # Process the request
+                    response = await self.handle_request(request_data)
+                
+                # Send the response
+                response_json = json.dumps(response)
+                logger.debug(f"Sending response: {response_json}")
+                print(response_json, flush=True)
+                
             except Exception as e:
-                logger.error(f"Error in create-browser job: {str(e)}")
-                return [{
-                    "type": "text",
-                    "text": f"Error creating browser: {str(e)}",
-                }]
-        
-        # Start the job in the background without waiting for it
-        asyncio.create_task(job_manager.run_job(job_id, create_browser_job()))
-        
-        # Return immediate response with job ID
-        return [
-            types.TextContent(
-                type="text",
-                text=f"Browser creation for project '{project_name}' started. Use get-job-status to check progress.\nJob ID: {job_id}",
-            )
-        ]
+                logger.exception("Unexpected error in server loop")
+                # Try to send an error response
+                error_response = self._generate_error_response(
+                    "",  # No ID available for unexpected errors
+                    f"Unexpected server error: {str(e)}"
+                )
+                try:
+                    print(json.dumps(error_response), flush=True)
+                except Exception:
+                    # If we can't even send the error response, just log it
+                    logger.critical("Failed to send error response")
     
-    elif name == "navigate-browser":
-        project_name = arguments.get("project_name")
-        url = arguments.get("url")
+    async def cleanup(self):
+        """Close all browser instances and cleanup resources"""
+        logger.info("Cleaning up before shutdown")
         
-        if not project_name or not url:
-            raise ValueError("Missing project_name or url")
-        
-        if project_name not in browser_operators:
-            raise ValueError(f"Browser for project '{project_name}' not found")
-        
-        browser_operator = browser_operators[project_name]
-        
-        # Create a new job for the navigation operation
-        job_id = job_manager.create_job(
-            operation_type="navigate-browser",
-            description=f"Navigate to: {url}",
-            project_name=project_name,
-            url=url
-        )
-        
-        # Define the async function that will run in the background
-        async def navigate_browser_job():
+        # Close all browser operators
+        for project_name, operator in self.operators.items():
             try:
-                result = await browser_operator.navigate(url)
-                
-                # Create text response with navigation results
-                response_text = result.get("text", f"Navigated to {url}")
-                
-                # Add error information if available
-                if "error" in result:
-                    response_text = f"Error navigating to {url}: {result['error']}\n{response_text}"
-                
-                response = [
-                    {
-                        "type": "text",
-                        "text": response_text,
-                    }
-                ]
-                
-                if "screenshot" in result and result["screenshot"]:
-                    try:
-                        response.append({
-                            "type": "image",
-                            "data": result["screenshot"],
-                            "mimeType": "image/png",
-                        })
-                    except Exception as e:
-                        response.append({
-                            "type": "text",
-                            "text": f"Could not process screenshot: {str(e)}",
-                        })
-                else:
-                    response.append({
-                        "type": "text",
-                        "text": "Could not take screenshot after navigation.",
-                    })
-                    
-                return response
+                logger.info(f"Closing browser for project: {project_name}")
+                await operator.close()
             except Exception as e:
-                logger.error(f"Error in navigate-browser job: {str(e)}")
-                return [{
-                    "type": "text",
-                    "text": f"Error navigating browser: {str(e)}",
-                }]
+                logger.error(f"Error closing browser for project {project_name}: {e}")
         
-        # Start the job in the background without waiting for it
-        asyncio.create_task(job_manager.run_job(job_id, navigate_browser_job()))
-        
-        # Return immediate response with job ID
-        return [
-            types.TextContent(
-                type="text",
-                text=f"Navigation for project '{project_name}' started. Use get-job-status to check progress.\nJob ID: {job_id}",
-            )
-        ]
-    
-    elif name == "operate-browser":
-        project_name = arguments.get("project_name")
-        instruction = arguments.get("instruction")
-        
-        if not project_name or not instruction:
-            raise ValueError("Missing project_name or instruction")
-        
-        if project_name not in browser_operators:
-            raise ValueError(f"Browser for project '{project_name}' not found")
-        
-        browser_operator = browser_operators[project_name]
-        
-        # Create a new job for the operation 
-        job_id = job_manager.create_job(
-            operation_type="operate-browser",
-            description=f"Instruction: {instruction[:50]}{'...' if len(instruction) > 50 else ''}",
-            project_name=project_name,
-            instruction=instruction
-        )
-        
-        # Define the async function that will run in the background
-        async def operate_browser_job():
-            try:
-                result = await browser_operator.process_message(instruction)
-                
-                # Get number of actions executed to add to response
-                actions_executed = result.get("actions_executed", 0)
-                
-                # Create response text with action count info if needed
-                result_text = result.get("text", "Operation completed")
-                
-                # Add error information if available
-                if "error" in result:
-                    result_text = f"Error processing instruction: {result['error']}\n{result_text}"
-                
-                if actions_executed == 0:
-                    # Add a note about no actions being performed
-                    result_text = "⚠️ No browser actions were performed. Please try a different instruction or provide more details.\n\n" + result_text
-                
-                response = [
-                    {
-                        "type": "text",
-                        "text": result_text,
-                    }
-                ]
-                
-                if "screenshot" in result and result["screenshot"]:
-                    try:
-                        response.append({
-                            "type": "image",
-                            "data": result["screenshot"],
-                            "mimeType": "image/png",
-                        })
-                    except Exception as e:
-                        response.append({
-                            "type": "text",
-                            "text": f"Could not process screenshot: {str(e)}",
-                        })
-                
-                return response
-            except Exception as e:
-                logger.error(f"Error in operate-browser job: {str(e)}")
-                return [{
-                    "type": "text",
-                    "text": f"Error operating browser: {str(e)}",
-                }]
-        
-        # Start the job in the background without waiting for it
-        asyncio.create_task(job_manager.run_job(job_id, operate_browser_job()))
-        
-        # Return immediate response with job ID
-        return [
-            types.TextContent(
-                type="text",
-                text=f"Browser operation for project '{project_name}' started. Use get-job-status to check progress.\nJob ID: {job_id}",
-            )
-        ]
-    
-    elif name == "close-browser":
-        project_name = arguments.get("project_name")
-        
-        if not project_name:
-            raise ValueError("Missing project_name")
-        
-        if project_name not in browser_operators:
-            raise ValueError(f"Browser for project '{project_name}' not found")
-        
-        # Create a new job for closing the browser 
-        job_id = job_manager.create_job(
-            operation_type="close-browser",
-            description=f"Close browser for project: {project_name}",
-            project_name=project_name
-        )
-        
-        # Define the async function that will run in the background
-        async def close_browser_job():
-            try:
-                browser_operator = browser_operators.pop(project_name)
-                await browser_operator.close()
-                
-                return [
-                    {
-                        "type": "text",
-                        "text": f"Closed browser for project: {project_name}",
-                    }
-                ]
-            except Exception as e:
-                logger.error(f"Error in close-browser job: {str(e)}")
-                return [{
-                    "type": "text",
-                    "text": f"Error closing browser: {str(e)}",
-                }]
-        
-        # Start the job in the background without waiting for it
-        asyncio.create_task(job_manager.run_job(job_id, close_browser_job()))
-        
-        # Return immediate response with job ID
-        return [
-            types.TextContent(
-                type="text",
-                text=f"Browser closing for project '{project_name}' started. Use get-job-status to check progress.\nJob ID: {job_id}",
-            )
-        ]
-    
-    else:
-        raise ValueError(f"Unknown tool: {name}")
-
-# We are not implementing our own JSON-RPC server handlers - we're using the MCP SDK
-# This was removed as it was interfering with the proper MCP JSON-RPC handlers
+        # Clear the operators dictionary
+        self.operators.clear()
+        logger.info("Cleanup complete")
 
 async def main():
-    # Use MCP's stdio server
+    """Main entry point for the MCP server"""
+    # Create the server
+    server = MCPServer()
+    
+    # Set up signal handlers for graceful shutdown
+    loop = asyncio.get_running_loop()
+    
+    def signal_handler():
+        logger.info("Received shutdown signal")
+        # Schedule the cleanup
+        asyncio.create_task(shutdown())
+    
+    async def shutdown():
+        logger.info("Shutting down MCP server")
+        await server.cleanup()
+        loop.stop()
+    
+    # Register signal handlers
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, signal_handler)
+    
     try:
-        # Start job manager cleanup task for background maintenance
-        logger.info("Starting job manager cleanup task")
-        job_manager.start_cleanup_task()
-        
-        # For development, this logging will help debug the errors
-        logger.info("Starting MCP server")
-        
-        # Make sure we're not using any custom stdout/stderr handlers that could break the MCP protocol
-        import sys
-        original_stdout = sys.stdout
-        original_stderr = sys.stderr
-        
-        # Run the MCP server with standard IO
-        async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-            logger.info("MCP stdio server created")
-            await server.run(
-                read_stream,
-                write_stream,
-                InitializationOptions(
-                    server_name="mcp-operator",
-                    server_version="0.1.0",
-                    capabilities=server.get_capabilities(
-                        notification_options=NotificationOptions(),
-                        experimental_capabilities={},
-                    ),
-                ),
-            )
+        # Start the server
+        await server.listen()
     except Exception as e:
-        # Log the error and exit gracefully
-        import traceback
-        error_text = f"Error in MCP server: {str(e)}\n{traceback.format_exc()}"
-        logger.critical(error_text)
-        
-        # Close any active browsers
-        for project_name, browser_op in browser_operators.items():
-            try:
-                asyncio.create_task(browser_op.close())
-                logger.info(f"Closed browser for project {project_name} during shutdown")
-            except Exception as close_err:
-                logger.error(f"Error closing browser {project_name}: {str(close_err)}")
-                
-        # Use an exit code to indicate error
-        sys.exit(1)
+        logger.exception(f"Error in MCP server: {e}")
+    finally:
+        # Ensure cleanup on exit
+        await server.cleanup()
+
+if __name__ == "__main__":
+    asyncio.run(main())

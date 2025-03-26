@@ -1,9 +1,3 @@
-from . import server
-import asyncio
+"""MCP Operator module for browser automation"""
 
-def main():
-    """Main entry point for the package."""
-    asyncio.run(server.main())
-
-# Optionally expose other important items at package level
-__all__ = ['main', 'server']
+__version__ = "0.1.0"

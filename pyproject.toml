@@ -20,7 +20,7 @@ requires = [ "hatchling",]
 build-backend = "hatchling.build"
 
 [project.scripts]
-mcp-operator = "mcp_operator:main"
+mcp-operator = "mcp_operator.__main__:main"
 
 [tool.pytest]
 testpaths = ["tests"]

@@ -1,261 +1,217 @@
-# mcp-operator MCP server
+# MCP Browser Operator
 
-A web browser operator MCP server project that allows AI assistants to control a Chrome browser.
+A Model Control Protocol (MCP) server for browser automation that enables LLMs to control a web browser, interact with web pages, and analyze web content through a standardized JSON-RPC interface.
 
-## Components
+## Features
 
-### Resources
+- **Browser Management**: Create, navigate, operate, and close browser instances
+- **Job Management**: Track status of browser operations with job IDs
+- **Web Interaction**: Execute natural language instructions using OpenAI's Computer Use API
+- **Browser Tools**: Access console logs, network activity, screenshots, and more
+- **Auditing**: Run accessibility, performance, SEO, and other web page audits
 
-The server implements a simple note storage system with:
-- Custom note:// URI scheme for accessing individual notes
-- Each note resource has a name, description and text/plain mimetype
+## Requirements
 
-### Prompts
+- Python 3.11+
+- Playwright
+- OpenAI API key (for the Computer Use API)
 
-The server provides a single prompt:
-- summarize-notes: Creates summaries of all stored notes
-  - Optional "style" argument to control detail level (brief/detailed)
-  - Generates prompt combining all current notes with style preference
+## Installation
 
-### Tools
+1. Clone this repository:
+   ```
+   git clone https://github.com/yourusername/operator-mcp.git
+   cd operator-mcp
+   ```
 
-The server implements the following tools:
+2. Install dependencies:
+   ```
+   pip install -e .
+   ```
 
-#### Note Management
-- add-note: Adds a new note to the server
-  - Takes "name" and "content" as required string arguments
-  - Updates server state and notifies clients of resource changes
+3. Install Playwright browsers:
+   ```
+   playwright install chromium
+   ```
 
-#### Browser Automation (Asynchronous/Job-based)
-The browser automation tools use an asynchronous job-based approach to prevent client timeouts during long-running operations.
+4. Set your OpenAI API key:
+   ```
+   export OPENAI_API_KEY=your-api-key
+   ```
 
-- create-browser: Creates a new browser instance
-  - Takes "project_name" as a required string argument (used for browser state identification and persistence)
-  - Returns a job_id for tracking the operation's progress
-  - When complete, provides confirmation message and initial screenshot
-  - Browser state (cookies, storage, etc.) is automatically saved between sessions based on project name
+## Usage
 
-- navigate-browser: Navigates to a URL in the browser
-  - Takes "project_name" and "url" as required string arguments
-  - Returns a job_id for tracking the operation's progress
-  - When complete, provides navigation result and current page screenshot
+Start the MCP server:
 
-- operate-browser: Operates the browser based on natural language instructions
-  - Takes "project_name" and "instruction" as required string arguments
-  - Returns a job_id for tracking the operation's progress
-  - Uses OpenAI's Computer Use API to interpret and interact with the current page
-  - Supports a wide range of actions: click, type, scroll, drag, keypress, etc.
-  - Handles multi-step operations through continuous action execution until task completion
-  - Enhanced context awareness for better page interaction decision-making
-  - Built-in stuck detection and recovery to handle repetitive action loops
-  - Provides detailed page element analysis for improved task completion
-  - When complete, provides execution results and updated page screenshot
+```
+python run_mcp_server.py
+```
 
-- close-browser: Closes a browser instance
-  - Takes "project_name" as a required string argument
-  - Returns a job_id for tracking the operation's progress
-  - When complete, provides confirmation message
+The server listens for JSON-RPC requests on stdin and responds on stdout, following the MCP protocol.
+
+### Core Methods
+
+#### Browser Management
+
+- **Create Browser**: Initialize a new browser instance
+  ```json
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "mcp__browser-operator__create-browser",
+    "params": {
+      "project_name": "my-project"
+    }
+  }
+  ```
+
+- **Navigate Browser**: Direct the browser to a specified URL
+  ```json
+  {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "mcp__browser-operator__navigate-browser",
+    "params": {
+      "project_name": "my-project",
+      "url": "https://example.com"
+    }
+  }
+  ```
+
+- **Operate Browser**: Execute natural language instructions for browser interaction
+  ```json
+  {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "mcp__browser-operator__operate-browser",
+    "params": {
+      "project_name": "my-project",
+      "instruction": "Find the heading on this page and tell me what it says."
+    }
+  }
+  ```
+
+- **Close Browser**: Terminate a browser instance
+  ```json
+  {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "mcp__browser-operator__close-browser",
+    "params": {
+      "project_name": "my-project"
+    }
+  }
+  ```
 
 #### Job Management
-- get-job-status: Checks the status of a browser operation job
-  - Takes "job_id" as a required string argument
-  - Returns job details including status, creation time, and results when complete
-  - For completed jobs with screenshots, includes the screenshot in the response
 
-- list-jobs: Lists recent browser operation jobs
-  - Optional "limit" parameter to control how many jobs to return (default: 10)
-  - Returns a list of job summaries sorted by most recent first
+- **Get Job Status**: Retrieve the status and result of an operation by job ID
+  ```json
+  {
+    "jsonrpc": "2.0",
+    "id": 5,
+    "method": "mcp__browser-operator__get-job-status",
+    "params": {
+      "job_id": "job-12345"
+    }
+  }
+  ```
 
-#### Asynchronous Workflow Pattern
-When using the browser automation tools with AI assistants, follow this pattern:
+- **List Jobs**: View recent browser operation jobs
+  ```json
+  {
+    "jsonrpc": "2.0",
+    "id": 6,
+    "method": "mcp__browser-operator__list-jobs",
+    "params": {
+      "limit": 10
+    }
+  }
+  ```
 
-1. **Start Operation**:
-   ```
-   // Example with operate-browser tool
-   result = operate-browser(project_name="amazon-shopping", instruction="Search for dinner plates on Amazon")
-   // Tool returns immediately with a job_id
-   job_id = extract_job_id_from(result)
-   ```
+#### User Notes
 
-2. **Poll for Completion**:
-   ```
-   // Check status until complete
-   status = get-job-status(job_id=job_id)
-   while status is not "completed":
-     wait brief period
-     status = get-job-status(job_id=job_id)
-   ```
+- **Add Note**: Create and store notes related to browser operations
+  ```json
+  {
+    "jsonrpc": "2.0",
+    "id": 7,
+    "method": "mcp__browser-operator__add-note",
+    "params": {
+      "name": "My Note",
+      "content": "Important information about this browser session"
+    }
+  }
+  ```
 
-3. **Process Results**:
-   ```
-   // When job completes, process the results
-   final_result = get-job-status(job_id=job_id)
-   // final_result will contain text output and screenshots
-   ```
+### Additional Methods
 
-This approach prevents client timeouts while allowing complex, long-running browser operations to complete.
+#### Browser Debugging Tools
+
+- **Get Console Logs**: `mcp__browser-tools__getConsoleLogs`
+- **Get Console Errors**: `mcp__browser-tools__getConsoleErrors`
+- **Get Network Logs**: `mcp__browser-tools__getNetworkLogs`
+- **Get Network Errors**: `mcp__browser-tools__getNetworkErrors`
+- **Take Screenshot**: `mcp__browser-tools__takeScreenshot`
+- **Get Selected Element**: `mcp__browser-tools__getSelectedElement`
+- **Wipe Logs**: `mcp__browser-tools__wipeLogs`
+
+#### Audit Tools
+
+- **Run Accessibility Audit**: `mcp__browser-tools__runAccessibilityAudit`
+- **Run Performance Audit**: `mcp__browser-tools__runPerformanceAudit`
+- **Run SEO Audit**: `mcp__browser-tools__runSEOAudit`
+- **Run NextJS Audit**: `mcp__browser-tools__runNextJSAudit`
+- **Run Best Practices Audit**: `mcp__browser-tools__runBestPracticesAudit`
+- **Run Debugger Mode**: `mcp__browser-tools__runDebuggerMode`
+- **Run Audit Mode**: `mcp__browser-tools__runAuditMode`
+
+## Asynchronous Workflow Pattern
+
+Browser operations are asynchronous and use a job-based approach:
+
+1. **Start Operation**: Call a browser method which returns a job_id
+2. **Poll for Completion**: Use get-job-status until job is completed
+3. **Process Results**: When job completes, access results from the job status
+
+This approach prevents client timeouts while allowing complex browser operations to complete.
 
 ## Persistent Browser State
 
-The MCP Operator supports persistent browser state when creating browsers with a project name:
+The MCP Operator maintains persistent state when browsers are created with a project name:
 
-### How It Works
+- Browser state (cookies, local storage, session storage) is preserved between sessions
+- Multiple projects can maintain independent browser states
+- Useful for maintaining login sessions, shopping carts, or other personalized state
 
-1. Create a browser with a meaningful project name:
-   ```
-   create-browser(project_name="amazon-shopping")
-   ```
+## Project Structure
 
-2. The browser state (cookies, local storage, session storage) is automatically:
-   - Loaded from disk if a previous session with the same project name exists
-   - Saved to disk after navigation and significant interactions
-   - Preserved between sessions, even if you close and later restart the application
-
-3. Multiple projects can maintain independent browser states:
-   ```
-   create-browser(project_name="shopping-project")
-   create-browser(project_name="research-project")
-   ```
-
-4. State files are stored in a temporary directory using a hash of the project name
-
-### Benefits
-
-- Maintain login sessions across browser restarts
-- Continue multi-step workflows from where they left off
-- Store shopping carts, preferences, and other personalized state
-- Simulate real user behavior with persistent browsing history
-
-## Configuration
-
-To use the browser automation tools, you need to:
-
-1. Install the necessary dependencies:
-   - Python 3.11 or higher
-   - Playwright for browser automation
-   - An OpenAI API key with access to the Computer Use API
-
-2. Set up your environment:
-   - Create a `.env` file or set environment variables:
-     ```
-     OPENAI_API_KEY=your-api-key-here
-     # Optional: If you have an org ID
-     # OPENAI_ORG=your-org-id
-     ```
-   - Install browser dependencies for Playwright with `playwright install chromium`
-
-## Quickstart
-
-### Install
-
-#### Claude Desktop
-
-On MacOS: `~/Library/Application\ Support/Claude/claude_desktop_config.json`
-On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
-
-<details>
-  <summary>Development/Unpublished Servers Configuration</summary>
-  ```
-  "mcpServers": {
-    "mcp-operator": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/Users/willer/GitHub/operator-mcp/mcp-operator",
-        "run",
-        "mcp-operator"
-      ]
-    }
-  }
-  ```
-</details>
-
-<details>
-  <summary>Published Servers Configuration</summary>
-  ```
-  "mcpServers": {
-    "mcp-operator": {
-      "command": "uvx",
-      "args": [
-        "mcp-operator"
-      ]
-    }
-  }
-  ```
-</details>
-
-## Multi-Step Operation Improvements
-
-The MCP operator has been enhanced with significant improvements to handle multi-step browser operations more effectively:
-
-### Key Improvements
-
-1. **Enhanced Initial Prompting**:
-   - Clearer, more direct system messages for the Computer Use API
-   - More structured instructions with explicit action requirements
-   - Emphasis on using direct navigation with full URLs
-
-2. **Stuck Detection and Resolution**:
-   - Automatic detection of repetitive clicking patterns
-   - Alternative action suggestions when stuck is detected
-   - Detailed page analysis to provide better context for decisions
-
-3. **Detailed Page Element Analysis**:
-   - Identification of key UI elements with coordinates (search bars, buttons, forms)
-   - Detection of page type (homepage, search results, product page, etc.)
-   - Visibility testing to ensure elements are present in viewport
-
-4. **Robust Navigation Handling**:
-   - Enhanced URL validation and automatic protocol addition
-   - Multi-stage navigation with appropriate timeouts
-   - Fallback strategies for navigation failures
-   - Verification of page loading state
-
-5. **Better Continuation Messages**:
-   - More context about previous actions and current page state
-   - Clear, focused instructions for the next action
-   - Presentation of clickable elements with their coordinates
-
-These improvements significantly enhance the ability of the system to complete complex multi-step tasks without getting stuck in repetitive action loops.
+- `src/mcp_operator/`: Main package
+  - `__init__.py`: Package initialization
+  - `__main__.py`: Entry point for package
+  - `server.py`: MCP server implementation
+  - `browser.py`: Browser operator implementation
+  - `cua/`: Computer Use API components
+    - `agent.py`: Agent implementation
+    - `computer.py`: Computer interface
+    - `utils.py`: Utility functions
+- `run_mcp_server.py`: Script to run the MCP server
 
 ## Development
 
-### Building and Publishing
+### Using MCP Inspector
 
-To prepare the package for distribution:
-
-1. Sync dependencies and update lockfile:
-```bash
-uv sync
-```
-
-2. Build package distributions:
-```bash
-uv build
-```
-
-This will create source and wheel distributions in the `dist/` directory.
-
-3. Publish to PyPI:
-```bash
-uv publish
-```
-
-Note: You'll need to set PyPI credentials via environment variables or command flags:
-- Token: `--token` or `UV_PUBLISH_TOKEN`
-- Or username/password: `--username`/`UV_PUBLISH_USERNAME` and `--password`/`UV_PUBLISH_PASSWORD`
-
-### Debugging
-
-Since MCP servers run over stdio, debugging can be challenging. For the best debugging
-experience, we strongly recommend using the [MCP Inspector](https://github.com/modelcontextprotocol/inspector).
-
-
-You can launch the MCP Inspector via [`npm`](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) with this command:
+For debugging, use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector):
 
 ```bash
-npx @modelcontextprotocol/inspector uv --directory /Users/willer/GitHub/operator-mcp/mcp-operator run mcp-operator
+npx @modelcontextprotocol/inspector python run_mcp_server.py
 ```
 
+This provides a web interface to test your MCP server.
 
-Upon launching, the Inspector will display a URL that you can access in your browser to begin debugging.
+## Security
+
+- Domain blocking for potentially harmful sites
+- URL validation before navigation
+- Session isolation between different browser instances
+- File-based logging (no stdout to preserve MCP protocol)
