@@ -276,11 +276,20 @@ class BrowserOperator:
                 
                 logger.info(f"Instruction processed with {actions_executed} actions executed")
             except Exception as agent_error:
-                logger.error(f"Agent run error: {str(agent_error)}")
+                error_text = str(agent_error)
+                logger.error(f"Agent run error: {error_text}")
                 logger.error(traceback.format_exc())
                 
+                # Detailed logging for OpenAI API errors
+                if "server_error" in error_text:
+                    logger.error(f"OpenAI API server error details: {error_text}")
+                    # Extract the request ID if available for better tracking
+                    import re
+                    request_id_match = re.search(r'req_[0-9a-f]{32}', error_text)
+                    request_id = request_id_match.group(0) if request_id_match else "unknown"
+                    logger.error(f"OpenAI API request ID: {request_id}")
+                
                 # Check for specific OpenAI API errors
-                error_text = str(agent_error)
                 if "server_error" in error_text or "500" in error_text:
                     message = "Task failed: OpenAI Computer Use API is experiencing server errors. Please try again later."
                 elif "rate limit" in error_text.lower():

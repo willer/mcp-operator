@@ -131,9 +131,9 @@ async def test_real_multistep_operation():
         
         # Initialize an agent that uses the already initialized browser
         operator.agent = Agent(
-            model="computer-use-preview",
+            model="gpt-4o-mini",  # Updated to latest model
             computer=None,  # Will be set below
-            allowed_domains=['*']  # Allow all domains using blocklist approach
+            allowed_domains=['google.com', 'www.google.com', 'example.com', 'wikipedia.org', 'cnn.com', 'github.com', 'chromium.org', 'about:blank']  # Allow specific domains
         )
         
         # Import required modules for the adapter
