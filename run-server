@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run the MCP Browser Operator server
+Main entry point for the MCP Browser Operator server
 """
 
 import os

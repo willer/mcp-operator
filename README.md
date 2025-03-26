@@ -44,10 +44,48 @@ A Model Control Protocol (MCP) server for browser automation that enables LLMs t
 Start the MCP server:
 
 ```
-python run_mcp_server.py
+./run-server
 ```
 
 The server listens for JSON-RPC requests on stdin and responds on stdout, following the MCP protocol.
+
+### Executable Scripts
+
+- `run-server` - Runs the MCP server (main entry point)
+  ```bash
+  # Run the MCP server
+  ./run-server
+  
+  # Run with specific log directory
+  ./run-server --log-dir /path/to/logs
+  
+  # Run in debug mode
+  ./run-server --debug
+  ```
+
+- `run-tests` - Runs all tests (with options for unit or integration only)
+  ```bash
+  # Run all tests
+  ./run-tests
+  
+  # Run only unit tests (faster)
+  ./run-tests --unit-only
+  
+  # Run only integration tests
+  ./run-tests --integration-only
+  
+  # Run with verbose output
+  ./run-tests --verbose
+  
+  # Run a specific test
+  ./run-tests --test TestBrowserOperatorMethods
+  ```
+
+- `run-test-harness` - Runs the server with MCP Inspector for interactive testing
+  ```bash
+  # Run with the MCP Inspector for interactive testing
+  ./run-test-harness
+  ```
 
 ### Core Methods
 
@@ -195,7 +233,9 @@ The MCP Operator maintains persistent state when browsers are created with a pro
     - `agent.py`: Agent implementation
     - `computer.py`: Computer interface
     - `utils.py`: Utility functions
-- `run_mcp_server.py`: Script to run the MCP server
+- `run-server`: Script to run the MCP server
+- `run-tests`: Script to run unit and integration tests
+- `run-test-harness`: Script to run with MCP Inspector
 
 ## Development
 
@@ -204,7 +244,11 @@ The MCP Operator maintains persistent state when browsers are created with a pro
 For debugging, use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector):
 
 ```bash
-npx @modelcontextprotocol/inspector python run_mcp_server.py
+# Use the included run-test-harness script
+./run-test-harness
+
+# Or directly:
+npx @modelcontextprotocol/inspector ./run-server
 ```
 
 This provides a web interface to test your MCP server.
